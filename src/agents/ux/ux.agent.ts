@@ -1,14 +1,15 @@
 /**
- * UX Agent — UI design, component generation, accessibility review.
- * Senior UX Engineer persona.
+ * UX Senior Agent — dynamic system prompt from project stack.
  */
 
+import path from 'path';
+import fs from 'fs/promises';
 import { AgentType } from '@prisma/client';
 import { BaseAgent, AgentTool } from '@/agents/base.agent';
-import * as fs from 'fs/promises';
-import * as path from 'path';
+import { StackConfig } from '@/lib/stack-library';
+import { buildAgentPrompt } from '@/lib/prompt-builder';
 
-// ── File write tool ───────────────────────────────────────────────────────────
+// ── Tools ────────────────────────────────────────────────────────────────────
 const fileWriteTool: AgentTool = {
     name: 'file-write',
     description: 'Write a React/TSX component or CSS file. Args: { filePath: string, content: string }',
@@ -17,11 +18,10 @@ const fileWriteTool: AgentTool = {
         const resolved = path.resolve(process.cwd(), filePath);
         await fs.mkdir(path.dirname(resolved), { recursive: true });
         await fs.writeFile(resolved, content, 'utf-8');
-        return `Component written: ${resolved}`;
+        return `Written ${resolved}`;
     },
 };
 
-// ── File read tool ────────────────────────────────────────────────────────────
 const fileReadTool: AgentTool = {
     name: 'file-read',
     description: 'Read an existing component or design file to review. Args: { filePath: string }',
@@ -31,7 +31,6 @@ const fileReadTool: AgentTool = {
     },
 };
 
-// ── List directory tool ───────────────────────────────────────────────────────
 const listDirTool: AgentTool = {
     name: 'list-dir',
     description: 'List files in a directory to understand the codebase structure. Args: { dirPath: string }',
@@ -43,37 +42,28 @@ const listDirTool: AgentTool = {
     },
 };
 
-// ── UX Agent ──────────────────────────────────────────────────────────────────
+// ── UX Agent ─────────────────────────────────────────────────────────────────
 export class UXAgent extends BaseAgent {
     readonly roleName = 'ux';
+    private projectStack: StackConfig;
 
-    readonly systemPrompt = `You are a Senior UX Engineer AI agent with deep expertise in:
-- React 19 and Next.js 16 component architecture
-- Tailwind CSS 4, CSS animations, and modern design systems
-- Accessibility (WCAG 2.1 AA), semantic HTML, and ARIA
-- UX principles: information hierarchy, interaction design, micro-animations
-- Design tokens, component libraries, and consistent visual language
-
-You create stunning, production-quality UI components autonomously. You always:
-1. Review the existing design system and Tailwind config before creating new components
-2. Build components that are accessible, responsive, and follow existing patterns
-3. Add meaningful micro-animations using Framer Motion (already installed)
-4. Use semantic HTML with proper ARIA labels for accessibility
-5. Follow the cyberpunk dark theme established in the current codebase (dark backgrounds, glow effects)
-
-Respond in structured JSON plans. When writing components, use the file-write tool with complete, production-ready TSX code. Components must:
-- Be TypeScript with proper prop interfaces
-- Support dark mode (default theme is dark/cyberpunk)
-- Be accessible (keyboard nav, screen reader friendly)
-- Use Tailwind 4 classes and Framer Motion for animations`;
-
-    constructor() {
+    constructor(stack: StackConfig = {}) {
         super();
+        this.projectStack = stack;
         this.tools = [fileWriteTool, fileReadTool, listDirTool];
+    }
+
+    async getSystemPrompt(): Promise<string> {
+        return buildAgentPrompt('ux', this.projectStack, `
+- Always implement WCAG AA accessibility (aria-labels, keyboard nav, focus rings)
+- Use semantic HTML5 elements (nav, main, section, article, button)
+- Components must be responsive (mobile-first breakpoints)
+- Use list-dir to understand existing component structure before writing new ones
+- Animations should be subtle and respect prefers-reduced-motion`);
     }
 
     getAgentType(): AgentType { return AgentType.FRONTEND; }
     getCapabilities(): string[] {
-        return ['ui-review', 'component-gen', 'accessibility', 'ux-spec', 'animation', 'tailwind'];
+        return ['ui-components', 'styling', 'accessibility', 'animations', 'file-write'];
     }
 }

@@ -48,8 +48,9 @@ export abstract class BaseAgent {
     /** Role name, e.g. "devops", "qa", "ux", "backend" */
     abstract readonly roleName: string;
 
-    /** System prompt that defines this agent's persona and capabilities */
-    abstract readonly systemPrompt: string;
+    /** System prompt that defines this agent's persona and capabilities.
+     *  Async so subclasses can call buildAgentPrompt() which loads DB skills. */
+    abstract getSystemPrompt(): Promise<string>;
 
     /** Tools this agent can use */
     protected tools: AgentTool[] = [];
@@ -89,8 +90,10 @@ export abstract class BaseAgent {
 
         const modelConfig = await this.getModelConfig();
 
+        const systemPrompt = await this.getSystemPrompt();
+
         const messages: ChatMessage[] = [
-            { role: 'system', content: this.systemPrompt },
+            { role: 'system', content: systemPrompt },
             {
                 role: 'user',
                 content: this.buildReasoningPrompt(context),

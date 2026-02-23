@@ -101,32 +101,56 @@ enum ModelProvider {
 }
 
 // ============================================
-// 7. Task System (Orchestrator)
+// 7. Project System (Stack-Agnostic)
+// ============================================
+model Project {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+
+  // Stack config: { frontend, backend, database, testing, deploy }
+  stack       Json     @default("{}")
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tasks       Task[]
+
+  @@index([createdAt])
+}
+
+// ============================================
+// 8. Task System (Orchestrator)
 // ============================================
 model Task {
   id            String   @id @default(cuid())
-  
+
   // User's original request
   userRequest   String
   summary       String?
-  
+
   // Status tracking
   status        TaskStatus @default(PENDING)
   assignedRole  String?   // which agent role handled this
-  
+
   // Results
   results       String[]  // output from agent execution
-  
+
+  // Project context (optional)
+  projectId     String?
+  project       Project?  @relation(fields: [projectId], references: [id])
+
   // Timestamps
   createdAt     DateTime @default(now())
   startedAt     DateTime?
   completedAt   DateTime?
-  
+
   // Relations
   subTasks      SubTask[]
-  
+
   @@index([status])
   @@index([createdAt])
+  @@index([projectId])
 }
 
 enum TaskStatus {
@@ -136,6 +160,39 @@ enum TaskStatus {
   SUCCESS
   FAILED
   WAITING_APPROVAL
+}
+
+// ============================================
+// 9. Agent Skills (Custom / SkillsMP)
+// ============================================
+model AgentSkill {
+  id          String   @id @default(cuid())
+
+  // Identity
+  name        String
+  description String?
+
+  // Which agent role this skill applies to
+  // "devops" | "backend" | "qa" | "ux" | "orchestrator" | "security" | "all"
+  agentRole   String   @default("all")
+
+  // The skill content (SKILL.md body or custom instructions)
+  content     String   @db.Text
+
+  // Source info (optional, for skills from SkillsMP / GitHub)
+  sourceUrl   String?
+  sourceAuthor String?
+
+  // Control
+  isActive    Boolean  @default(true)
+  priority    Int      @default(0) // higher = injected first in prompt
+
+  // Timestamps
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([agentRole])
+  @@index([isActive])
 }
 
 model SubTask {

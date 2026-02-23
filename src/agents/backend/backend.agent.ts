@@ -1,14 +1,15 @@
 /**
- * Backend Agent — API design, DB schema, business logic.
- * Senior Backend Engineer persona.
+ * Backend Senior Agent — dynamic system prompt from project stack.
  */
 
+import path from 'path';
+import fs from 'fs/promises';
 import { AgentType } from '@prisma/client';
 import { BaseAgent, AgentTool } from '@/agents/base.agent';
-import * as fs from 'fs/promises';
-import * as path from 'path';
+import { StackConfig } from '@/lib/stack-library';
+import { buildAgentPrompt } from '@/lib/prompt-builder';
 
-// ── File write tool ───────────────────────────────────────────────────────────
+// ── File Tools ────────────────────────────────────────────────────────────────
 const fileWriteTool: AgentTool = {
     name: 'file-write',
     description: 'Write content to a file. Args: { filePath: string, content: string }',
@@ -17,11 +18,10 @@ const fileWriteTool: AgentTool = {
         const resolved = path.resolve(process.cwd(), filePath);
         await fs.mkdir(path.dirname(resolved), { recursive: true });
         await fs.writeFile(resolved, content, 'utf-8');
-        return `Written ${content.length} chars to ${resolved}`;
+        return `Written ${resolved}`;
     },
 };
 
-// ── File read tool ────────────────────────────────────────────────────────────
 const fileReadTool: AgentTool = {
     name: 'file-read',
     description: 'Read content of a file. Args: { filePath: string }',
@@ -35,30 +35,23 @@ const fileReadTool: AgentTool = {
 // ── Backend Agent ─────────────────────────────────────────────────────────────
 export class BackendAgent extends BaseAgent {
     readonly roleName = 'backend';
+    private projectStack: StackConfig;
 
-    readonly systemPrompt = `You are a Senior Backend Engineer AI agent with deep expertise in:
-- Next.js App Router API routes and server actions
-- Prisma ORM, PostgreSQL, and database schema design
-- RESTful API design, validation (Zod), and error handling
-- Authentication, authorization, and security best practices
-- Performance optimization, caching, and scalability
-
-You write production-quality TypeScript code. You always:
-1. Design APIs with proper input validation using Zod
-2. Use proper error boundaries and HTTP status codes
-3. Consider database indexing and query optimization
-4. Write self-documenting code with clear interfaces
-5. Follow the existing codebase patterns (Next.js App Router, Prisma)
-
-Respond in structured JSON plans. When writing code, use the file-write tool with complete, runnable TypeScript.`;
-
-    constructor() {
+    constructor(stack: StackConfig = {}) {
         super();
+        this.projectStack = stack;
         this.tools = [fileWriteTool, fileReadTool];
+    }
+
+    async getSystemPrompt(): Promise<string> {
+        return buildAgentPrompt('backend', this.projectStack, `
+- File paths should be relative to project root
+- Use the file-write tool to create/update source files
+- Use the file-read tool to inspect existing code before modifying`);
     }
 
     getAgentType(): AgentType { return AgentType.BACKEND; }
     getCapabilities(): string[] {
-        return ['api-design', 'db-schema', 'prisma', 'validation', 'auth', 'next-js'];
+        return ['api', 'database', 'validation', 'auth', 'file-write'];
     }
 }

@@ -1,6 +1,6 @@
 /**
- * Orchestrator Agent — Routes tasks to the right role agent.
- * Brain of the multi-agent team.
+ * Orchestrator Agent — Routes tasks to the correct role agent.
+ * Now stack-aware: passes project's StackConfig to each role agent.
  */
 
 import { AgentType } from '@prisma/client';
@@ -9,39 +9,41 @@ import { DevOpsAgent } from '@/agents/devops/devops.agent';
 import { BackendAgent } from '@/agents/backend/backend.agent';
 import { QAAgent } from '@/agents/qa/qa.agent';
 import { UXAgent } from '@/agents/ux/ux.agent';
+import { StackConfig } from '@/lib/stack-library';
+import { buildAgentPrompt } from '@/lib/prompt-builder';
+import { getProjectConfig } from '@/lib/project-config';
 
-// Role classification keywords
+// ── Role classification keywords ──────────────────────────────────────────────
 const ROLE_KEYWORDS: Record<string, string[]> = {
-    devops: ['deploy', 'server', 'vps', 'ssh', 'docker', 'nginx', 'systemd', 'disk', 'cpu', 'memory', 'infra', 'ci/cd', 'pipeline', 'scale'],
-    backend: ['api', 'route', 'database', 'schema', 'prisma', 'endpoint', 'auth', 'backend', 'server-side', 'migration', 'query', 'model'],
-    qa: ['test', 'bug', 'quality', 'coverage', 'playwright', 'vitest', 'spec', 'assertion', 'review code', 'security audit', 'lint'],
-    ux: ['ui', 'component', 'design', 'css', 'tailwind', 'animation', 'accessibility', 'a11y', 'layout', 'frontend', 'figma', 'ux', 'form', 'button'],
+    devops: ['deploy', 'server', 'vps', 'ssh', 'docker', 'nginx', 'systemd', 'disk', 'cpu',
+        'memory', 'infra', 'ci/cd', 'pipeline', 'scale', 'container', 'kubernetes'],
+    backend: ['api', 'route', 'database', 'schema', 'endpoint', 'auth', 'backend',
+        'server-side', 'migration', 'query', 'model', 'crud', 'rest', 'graphql'],
+    qa: ['test', 'bug', 'quality', 'coverage', 'playwright', 'vitest', 'jest', 'pytest',
+        'spec', 'assertion', 'review code', 'security audit', 'lint', 'e2e'],
+    ux: ['ui', 'component', 'design', 'css', 'tailwind', 'animation', 'accessibility',
+        'a11y', 'layout', 'frontend', 'ux', 'form', 'button', 'page', 'view', 'screen'],
 };
+
+// ── Extended context for stack-aware dispatch ─────────────────────────────────
+export interface OrchestratorContext extends TaskContext {
+    projectId?: string;
+    stack?: StackConfig; // can be supplied directly or loaded via projectId
+}
 
 export class OrchestratorAgent extends BaseAgent {
     readonly roleName = 'orchestrator';
 
-    readonly systemPrompt = `You are an AI Team Orchestrator. Your job is to analyze user requests
-and determine:
-1. Which agent role should handle the task (devops/backend/qa/ux)
-2. Whether the task should be split across multiple agents
-3. The priority and risk level of the task
+    async getSystemPrompt(): Promise<string> {
+        return buildAgentPrompt('orchestrator', {}, `
+Routing guidelines:
+- devops: server management, deployments, Docker, SSH, CI/CD, infra
+- backend: API design, database models, auth, business logic, CRUD
+- qa: testing, bug reports, code review, coverage analysis
+- ux: UI components, design, styling, accessibility, animations
 
-Agent roles:
-- devops: Server management, deployments, Docker, SSH, CI/CD
-- backend: API design, database, Prisma, business logic, auth
-- qa: Testing, bug reports, code review, test generation
-- ux: UI components, design, CSS, accessibility, animations
-
-Respond in structured JSON plans as defined.`;
-
-    // Map of instantiated role agents
-    private readonly roleAgents: Record<string, BaseAgent> = {
-        devops: new DevOpsAgent(),
-        backend: new BackendAgent(),
-        qa: new QAAgent(),
-        ux: new UXAgent(),
-    };
+Always route to the most specific role. When in doubt, prefer backend.`);
+    }
 
     getAgentType(): AgentType { return AgentType.ORCHESTRATOR; }
     getCapabilities(): string[] {
@@ -50,54 +52,71 @@ Respond in structured JSON plans as defined.`;
 
     /** Classify which agent role should handle a task */
     classifyTask(userRequest: string): string {
-        const lowerReq = userRequest.toLowerCase();
+        const lower = userRequest.toLowerCase();
         const scores: Record<string, number> = { devops: 0, backend: 0, qa: 0, ux: 0 };
 
         for (const [role, keywords] of Object.entries(ROLE_KEYWORDS)) {
             for (const kw of keywords) {
-                if (lowerReq.includes(kw)) scores[role]++;
+                if (lower.includes(kw)) scores[role]++;
             }
         }
 
-        // Pick the highest scoring role, default to backend
         const best = (Object.entries(scores) as [string, number][])
             .sort(([, a], [, b]) => b - a)[0];
 
         return best[1] > 0 ? best[0] : 'backend';
     }
 
-    /** Dispatch a task directly to the correct agent */
-    async dispatch(context: TaskContext): Promise<{
+    /** Build a fresh role agent with the project's stack injected */
+    private buildRoleAgent(role: string, stack: StackConfig): BaseAgent {
+        switch (role) {
+            case 'devops': return new DevOpsAgent(stack);
+            case 'backend': return new BackendAgent(stack);
+            case 'qa': return new QAAgent(stack);
+            case 'ux': return new UXAgent(stack);
+            default: return new BackendAgent(stack);
+        }
+    }
+
+    /** Dispatch a task to the correct agent, injecting project stack context */
+    async dispatch(context: OrchestratorContext): Promise<{
         assignedRole: string;
         plan: AgentPlan;
         results: string[];
     }> {
         if (!this.agentId) await this.initialize();
 
-        // Classify first
+        // Resolve stack from projectId or use directly supplied stack
+        let stack: StackConfig = context.stack ?? {};
+        if (context.projectId && !context.stack) {
+            const project = await getProjectConfig(context.projectId);
+            if (project) {
+                stack = project.stack;
+                await this.log('INFO' as never, `📦 Project: "${project.name}" — Stack: ${[project.stack.frontend, project.stack.backend, project.stack.database]
+                    .filter(Boolean).join(' + ')
+                    }`);
+            }
+        }
+
+        // Classify + build stack-aware agent
         const role = this.classifyTask(context.userRequest);
-        const agent = this.roleAgents[role];
+        const agent = this.buildRoleAgent(role, stack);
 
-        await this.log('INFO' as any, `🎯 Routing task to [${role.toUpperCase()}] agent`);
+        await this.log('INFO' as never, `🎯 Routing to [${role.toUpperCase()}] agent`);
 
-        // Ensure target agent is initialized
         await agent.initialize();
-
-        // Run the target agent
         const { plan, results } = await agent.run(context);
 
-        await this.log('SUCCESS' as any, `✅ Task dispatched to ${role} — ${results.length} results`);
+        await this.log('SUCCESS' as never, `✅ Task complete — ${results.length} action(s) taken`);
 
         return { assignedRole: role, plan, results };
     }
 }
 
-// ── Singleton instance ────────────────────────────────────────────────────────
+// ── Singleton ─────────────────────────────────────────────────────────────────
 let _orchestrator: OrchestratorAgent | null = null;
 
 export function getOrchestrator(): OrchestratorAgent {
-    if (!_orchestrator) {
-        _orchestrator = new OrchestratorAgent();
-    }
+    if (!_orchestrator) _orchestrator = new OrchestratorAgent();
     return _orchestrator;
 }

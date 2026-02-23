@@ -1,12 +1,13 @@
 /**
- * DevOps Agent — SSH & Docker operations with LLM-powered reasoning.
- * Extends BaseAgent. Security Guardian filter runs before any SSH execution.
+ * DevOps Senior Agent — dynamic system prompt + stack-aware deploy advice.
  */
 
 import { AgentType } from '@prisma/client';
 import { BaseAgent, AgentTool } from '@/agents/base.agent';
 import { GuardianFilter } from '@/agents/security/filters';
 import { sshTool } from '@/tools/ssh/ssh.tool';
+import { StackConfig } from '@/lib/stack-library';
+import { buildAgentPrompt } from '@/lib/prompt-builder';
 
 // ── SSH Execute Tool ──────────────────────────────────────────────────────────
 const sshExecuteTool: AgentTool = {
@@ -16,13 +17,11 @@ const sshExecuteTool: AgentTool = {
         const command = args.command as string;
         const vpsId = args.vpsId as string;
 
-        // Security filter before ANY execution
         const validation = await GuardianFilter.validate(command);
         if (!validation.isAllowed) {
             throw new Error(`Security blocked (${validation.riskLevel}): ${validation.blockReason}`);
         }
 
-        // Look up VPS config from DB
         const { prisma } = await import('@/lib/prisma');
         const vps = await prisma.vPS.findUnique({ where: { id: vpsId } });
         if (!vps) throw new Error(`VPS not found: ${vpsId}`);
@@ -71,25 +70,20 @@ const dockerExecuteTool: AgentTool = {
 // ── DevOps Agent ──────────────────────────────────────────────────────────────
 export class DevOpsAgent extends BaseAgent {
     readonly roleName = 'devops';
+    private projectStack: StackConfig;
 
-    readonly systemPrompt = `You are a Senior DevOps Engineer AI agent with deep expertise in:
-- Linux system administration and shell scripting
-- Docker, Docker Compose, and container orchestration
-- Nginx, systemd, and process management
-- CI/CD pipelines, deployments, and rollbacks
-- Security hardening and zero-trust principles
-
-You manage infrastructure autonomously. You always:
-1. Assess risk before executing any command
-2. Prefer read-only commands to inspect state before mutating it
-3. Avoid destructive operations unless explicitly authorized
-4. Document every action with clear reasoning
-
-You respond in structured JSON plans. Never execute commands that could damage the system.`;
-
-    constructor() {
+    constructor(stack: StackConfig = {}) {
         super();
+        this.projectStack = stack;
         this.tools = [sshExecuteTool, dockerExecuteTool];
+    }
+
+    async getSystemPrompt(): Promise<string> {
+        return buildAgentPrompt('devops', this.projectStack, `
+- ALWAYS run read-only commands first (df -h, docker ps, systemctl status) before mutations
+- Security Guardian filter validates every command before execution
+- For deployments: pull image → stop old → start new → verify health
+- Never run commands that could cause data loss without explicit confirmation`);
     }
 
     getAgentType(): AgentType { return AgentType.DEVOPS; }

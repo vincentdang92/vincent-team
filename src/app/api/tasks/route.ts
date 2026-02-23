@@ -11,6 +11,7 @@ import { z } from 'zod';
 const taskSchema = z.object({
     userRequest: z.string().min(1).max(2000),
     vpsId: z.string().optional(),
+    projectId: z.string().optional(),
     metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
@@ -33,6 +34,7 @@ export async function POST(req: NextRequest) {
             data: {
                 userRequest,
                 status: 'PENDING',
+                ...(parsed.data.projectId ? { projectId: parsed.data.projectId } : {}),
             },
         });
 
@@ -43,6 +45,7 @@ export async function POST(req: NextRequest) {
                 taskId: task.id,
                 userRequest,
                 vpsId,
+                projectId: parsed.data.projectId,
                 metadata,
             })
             .then(async ({ assignedRole, plan, results }: {
