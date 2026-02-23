@@ -52,6 +52,15 @@ interface AgentSkill {
     createdAt: string;
 }
 
+interface AgentMemory {
+    id: string;
+    agentRole: string;
+    content: string;
+    memoryType: 'SHORT_TERM' | 'LESSON';
+    importance: number;
+    createdAt: string;
+}
+
 interface LogEntry {
     id: string;
     roleName: string;
@@ -126,6 +135,9 @@ export default function DashboardPage() {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [activeTab, setActiveTab] = useState<'team' | 'tasks' | 'logs' | 'skills'>('team');
     const [showProjectWizard, setShowProjectWizard] = useState(false);
+    // memories: keyed by agentRole
+    const [memories, setMemories] = useState<Record<string, AgentMemory[]>>({});
+    const [expandedMemory, setExpandedMemory] = useState<string | null>(null);
     // Skill form state
     const [skillForm, setSkillForm] = useState({
         name: '', description: '', agentRole: 'all', content: '', sourceUrl: '', priority: 0,
@@ -144,6 +156,18 @@ export default function DashboardPage() {
         }).catch(() => { });
         fetch('/api/tasks').then(r => r.json()).then(d => setTasks(d.tasks ?? [])).catch(() => { });
         fetch('/api/skills').then(r => r.json()).then(d => setSkills(d.skills ?? [])).catch(() => { });
+        // Load memories grouped by agentRole
+        fetch('/api/memories')
+            .then(r => r.json())
+            .then(d => {
+                const grouped: Record<string, AgentMemory[]> = {};
+                for (const m of (d.memories ?? []) as AgentMemory[]) {
+                    if (!grouped[m.agentRole]) grouped[m.agentRole] = [];
+                    grouped[m.agentRole].push(m);
+                }
+                setMemories(grouped);
+            })
+            .catch(() => { });
     }, []);
 
     const addLog = useCallback((roleName: string, message: string, type = 'INFO') => {
@@ -371,7 +395,13 @@ export default function DashboardPage() {
                                         key={agent.id}
                                         agent={agent}
                                         activeStack={activeProject?.stack}
+                                        agentMemories={memories[agent.role] ?? []}
                                         onModelSwitch={provider => handleModelSwitch(agent.id, provider)}
+                                        onForgetMemories={async () => {
+                                            await fetch(`/api/memories/clear?agentRole=${agent.role}`, { method: 'DELETE' });
+                                            setMemories(prev => ({ ...prev, [agent.role]: [] }));
+                                            addLog(agent.role, `🧹 Memories cleared for ${agent.name}`);
+                                        }}
                                     />
                                 ))}
                             </div>
@@ -540,8 +570,8 @@ export default function DashboardPage() {
                                             <button
                                                 onClick={() => handleToggleSkill(skill)}
                                                 className={`text-xs px-3 py-1 rounded-lg transition-colors ${skill.isActive
-                                                        ? 'bg-purple-600/20 text-purple-400 hover:bg-red-600/20 hover:text-red-400'
-                                                        : 'bg-gray-800 text-gray-500 hover:bg-purple-600/20 hover:text-purple-400'
+                                                    ? 'bg-purple-600/20 text-purple-400 hover:bg-red-600/20 hover:text-red-400'
+                                                    : 'bg-gray-800 text-gray-500 hover:bg-purple-600/20 hover:text-purple-400'
                                                     }`}
                                             >
                                                 {skill.isActive ? 'Active' : 'Inactive'}
@@ -576,13 +606,17 @@ export default function DashboardPage() {
 
 // ── Agent Card ──────────────────────────────────────────────────────────────
 function AgentCard({
-    agent, activeStack, onModelSwitch
+    agent, activeStack, agentMemories, onModelSwitch, onForgetMemories
 }: {
     agent: AgentInfo;
     activeStack?: StackConfig;
+    agentMemories: AgentMemory[];
     onModelSwitch: (p: ModelProvider) => void;
+    onForgetMemories: () => Promise<void>;
 }) {
     const c = ROLE_COLORS[agent.role];
+    const [memExpanded, setMemExpanded] = useState(false);
+    const [forgetting, setForgetting] = useState(false);
 
     // Determine which stack key is relevant for this agent
     const stackHints: Partial<Record<AgentRole, StackCategory[]>> = {
@@ -648,6 +682,46 @@ function AgentCard({
                 >
                     {MODEL_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </select>
+            </div>
+
+            {/* 🧠 Memory Panel */}
+            <div className="border-t border-gray-800 pt-3">
+                <button
+                    onClick={() => setMemExpanded(p => !p)}
+                    className="flex items-center justify-between w-full text-xs text-gray-500 hover:text-gray-300 transition-colors"
+                >
+                    <span>🧠 Memory <span className={`ml-1 px-1.5 py-0.5 rounded-full text-xs font-mono ${agentMemories.length > 0 ? `${c.bg} ${c.text}` : 'bg-gray-800 text-gray-600'
+                        }`}>{agentMemories.length}</span></span>
+                    <span>{memExpanded ? '▲' : '▼'}</span>
+                </button>
+
+                {memExpanded && (
+                    <div className="mt-2 space-y-2">
+                        {agentMemories.length === 0 ? (
+                            <p className="text-xs text-gray-600 italic">No memories yet — memories are saved after each completed task.</p>
+                        ) : (
+                            agentMemories.slice(0, 3).map(m => (
+                                <div key={m.id} className="bg-gray-800/60 rounded-lg p-2 text-xs text-gray-400">
+                                    <span className={`text-xs px-1.5 py-0.5 rounded-full mr-1.5 ${m.memoryType === 'LESSON' ? 'bg-yellow-900/60 text-yellow-400' : 'bg-gray-700 text-gray-500'
+                                        }`}>{m.memoryType === 'LESSON' ? '⭐ Lesson' : '🕐'}</span>
+                                    {m.content.slice(0, 90)}{m.content.length > 90 ? '…' : ''}
+                                </div>
+                            ))
+                        )}
+                        {agentMemories.length > 3 && (
+                            <p className="text-xs text-gray-600 text-center">+{agentMemories.length - 3} more memories</p>
+                        )}
+                        {agentMemories.length > 0 && (
+                            <button
+                                onClick={async () => { setForgetting(true); await onForgetMemories(); setForgetting(false); }}
+                                disabled={forgetting}
+                                className="text-xs text-red-500/70 hover:text-red-400 transition-colors disabled:opacity-40"
+                            >
+                                {forgetting ? '⟳ Clearing…' : '🗑 Forget all memories'}
+                            </button>
+                        )}
+                    </div>
+                )}
             </div>
         </motion.div>
     );

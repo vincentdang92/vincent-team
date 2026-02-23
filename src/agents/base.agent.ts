@@ -8,6 +8,11 @@ import { callModel, ChatMessage, ModelConfig, ModelProvider } from '@/lib/model-
 import { getAgentModelConfig } from '@/lib/model-config';
 import { AgentStatus, LogType, LogLevel } from '@prisma/client';
 import { emitAgentLog } from '@/lib/socket';
+import {
+    getRecentMemories, getLessons, getProjectSummary,
+    saveMemory, formatMemoryBlock,
+} from '@/lib/memory-store';
+import { summarizeTaskResult, maybeRefreshProjectSummary } from '@/lib/memory-summarizer';
 
 // ── Tool interface ─────────────────────────────────────────────────────────────
 export interface AgentTool {
@@ -37,6 +42,7 @@ export interface TaskContext {
     taskId?: string;
     userRequest: string;
     vpsId?: string;
+    projectId?: string;   // used to scope memories to a project
     metadata?: Record<string, unknown>;
 }
 
@@ -96,7 +102,7 @@ export abstract class BaseAgent {
             { role: 'system', content: systemPrompt },
             {
                 role: 'user',
-                content: this.buildReasoningPrompt(context),
+                content: await this.buildReasoningPrompt(context),
             },
         ];
 
@@ -155,11 +161,48 @@ export abstract class BaseAgent {
         return results;
     }
 
-    /** High-level: reason then execute */
+    /** High-level: reason then execute, then save memory */
     async run(context: TaskContext): Promise<{ plan: AgentPlan; results: string[] }> {
         if (!this.agentId) await this.initialize();
         const plan = await this.reason(context);
         const results = await this.execute(plan, context);
+
+        // ── Save memory after task completes ──────────────────
+        try {
+            const memorySummary = await summarizeTaskResult({
+                userRequest: context.userRequest,
+                taskSummary: plan.taskSummary,
+                results,
+                agentRole: this.roleName,
+            });
+
+            await saveMemory({
+                agentRole: this.roleName,
+                content: memorySummary,
+                projectId: context.projectId ?? null,
+                taskId: context.taskId ?? null,
+            });
+
+            await this.log(LogType.INFO, `🧠 Memory saved: ${memorySummary.slice(0, 80)}…`);
+
+            // Refresh project summary every 5 tasks
+            if (context.projectId) {
+                const recent = await getRecentMemories(this.roleName, context.projectId, 10);
+                const currentSummary = await getProjectSummary(context.projectId);
+                const allCount = await prisma.agentMemory.count({
+                    where: { projectId: context.projectId }
+                });
+                await maybeRefreshProjectSummary({
+                    projectId: context.projectId,
+                    taskCount: allCount,
+                    recentMemories: recent.map(m => m.content),
+                    currentSummary,
+                });
+            }
+        } catch {
+            // Memory save failure must never crash the task result
+        }
+
         return { plan, results };
     }
 
@@ -174,10 +217,19 @@ export abstract class BaseAgent {
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────────
-    private buildReasoningPrompt(context: TaskContext): string {
+    private async buildReasoningPrompt(context: TaskContext): Promise<string> {
+        // Fetch memory context in parallel
+        const [memories, lessons, projectSummary] = await Promise.all([
+            getRecentMemories(this.roleName, context.projectId ?? null, 5),
+            getLessons(this.roleName, context.projectId ?? null),
+            context.projectId ? getProjectSummary(context.projectId) : Promise.resolve(null),
+        ]);
+
+        const memoryBlock = formatMemoryBlock(memories, projectSummary, lessons);
+
         return `
 You are a ${this.roleName} agent. Analyze this task and produce a JSON plan.
-
+${memoryBlock ? `\n${memoryBlock}\n` : ''}
 **Task:** ${context.userRequest}
 ${context.vpsId ? `**Target VPS:** ${context.vpsId}` : ''}
 ${context.metadata ? `**Context:** ${JSON.stringify(context.metadata)}` : ''}

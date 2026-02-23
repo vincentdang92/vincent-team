@@ -195,6 +195,49 @@ model AgentSkill {
   @@index([isActive])
 }
 
+// ============================================
+// 10. Agent Memory (Phase 5A)
+// ============================================
+model AgentMemory {
+  id          String     @id @default(cuid())
+
+  // Scope
+  agentRole   String     // "devops" | "backend" | "qa" | "ux" | "orchestrator"
+  projectId   String?    // scoped to a project, or global if null
+
+  // Memory content (AI-summarised task result)
+  memoryType  MemoryType @default(SHORT_TERM)
+  content     String     @db.Text
+  taskId      String?    // source task reference (optional)
+
+  // Relevance weighting
+  importance  Int        @default(0) // 0=normal, 50=high, 100=critical
+
+  createdAt   DateTime   @default(now())
+
+  @@index([agentRole])
+  @@index([projectId])
+  @@index([memoryType])
+  @@index([createdAt])
+}
+
+enum MemoryType {
+  SHORT_TERM  // recent task results — auto-rotate after 30 entries
+  LESSON      // manually promoted permanent learnings
+}
+
+// Rolling AI-condensed summary of a project's history
+model ProjectSummary {
+  id          String   @id @default(cuid())
+  projectId   String   @unique
+  content     String   @db.Text  // 3-5 sentence rolling summary
+  taskCount   Int      @default(0)
+  updatedAt   DateTime @updatedAt
+  createdAt   DateTime @default(now())
+
+  @@index([projectId])
+}
+
 model SubTask {
   id          String   @id @default(cuid())
   

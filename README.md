@@ -4,7 +4,7 @@
 
 **The world's most paranoid, stack-aware, skill-powered AI team for your codebase.**
 
-[![Phase](https://img.shields.io/badge/Phase-4%20Complete-blueviolet?style=for-the-badge)](.)
+[![Phase](https://img.shields.io/badge/Phase-5%20Active-blueviolet?style=for-the-badge)](.)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.6-blue?style=for-the-badge&logo=typescript)](.)
 [![Next.js](https://img.shields.io/badge/Next.js-15-black?style=for-the-badge&logo=next.js)](.)
 [![Prisma](https://img.shields.io/badge/Prisma-6-2D3748?style=for-the-badge&logo=prisma)](.)
@@ -79,6 +79,25 @@ Supported stack categories:
 | **Testing** | Vitest, Jest, PyTest, Playwright, Cypress |
 | **Deploy** | Docker, Kubernetes, PM2, Nginx, Vercel, Railway, Fly.io |
 | **Mobile** | React Native, Flutter, Swift, Kotlin, Capacitor |
+
+---
+
+### 🧠 Agent Memory (Phase 5)
+Agents **remember what they've done** across tasks — no more re-explaining context.
+
+- **Short-term recall** — last 5 task results injected into every reasoning prompt
+- **Lessons** — manually promote any memory to permanent team knowledge
+- **Project Summary** — rolling AI-condensed context refreshed every 5 tasks
+- **Forget control** — clear an agent's memory from the dashboard in one click
+- Uses cheapest model (DeepSeek default) for summarization — low token cost
+
+```
+## 🧠 What I Remember
+**Project Context:** NestJS + Prisma project with Stripe integration in progress.
+**Recent Work:**
+- [2h ago] Created /payments POST endpoint with Stripe checkout session
+- [30m ago] Fixed auth middleware — Bearer token was missing from header check
+```
 
 ---
 
@@ -178,11 +197,12 @@ OLLAMA_MODEL="llama3.1"
 ```
 ai-devops-guardian/
 ├── prisma/
-│   └── schema.prisma              # 8 models: VPS, Agent, Task, SubTask,
-│                                  #   AgentLog, CommandHistory, Project, AgentSkill
+│   └── schema.prisma              # 10 models: VPS, Agent, Task, SubTask,
+│                                  #   AgentLog, CommandHistory, Project,
+│                                  #   AgentSkill, AgentMemory, ProjectSummary
 ├── src/
 │   ├── agents/
-│   │   ├── base.agent.ts          # Abstract base with reason→plan→execute loop
+│   │   ├── base.agent.ts          # Abstract base — reason→execute→save memory
 │   │   ├── orchestrator/          # 🧠 Task router & planner
 │   │   ├── devops/                # ⚙️ SSH + Docker specialist
 │   │   ├── backend/               # 🛠️ API + DB specialist
@@ -194,6 +214,8 @@ ai-devops-guardian/
 │   │   ├── model-config.ts        # Per-agent model config (DB-backed)
 │   │   ├── prompt-builder.ts      # Async stack-aware + skill-injecting prompt builder
 │   │   ├── skill-loader.ts        # Fetches active AgentSkills from DB at prompt time
+│   │   ├── memory-store.ts        # CRUD + formatting for AgentMemory / ProjectSummary
+│   │   ├── memory-summarizer.ts   # AI-powered task→memory condenser
 │   │   ├── stack-library.ts       # 30+ tech options across 6 categories
 │   │   └── project-config.ts      # Project ↔ stack config resolver
 │   ├── tools/
@@ -203,7 +225,8 @@ ai-devops-guardian/
 │       │   ├── tasks/             # POST /api/tasks → triggers orchestrator
 │       │   ├── agents/[id]/model  # PATCH → switch AI model per agent
 │       │   ├── projects/          # CRUD for projects with stack config
-│       │   └── skills/            # CRUD for AgentSkills
+│       │   ├── skills/            # CRUD for AgentSkills
+│       │   └── memories/          # CRUD for AgentMemory + bulk clear
 │       └── dashboard/             # The War Room (4-tab cyberpunk UI)
 ```
 
@@ -299,13 +322,16 @@ Agent    Agent           Agent      Agent
 - Dashboard **🧠 Skills** tab with paste form, toggle, delete
 - Support for [SkillsMP.com](https://skillsmp.com) skill format
 
-### 🔜 Phase 5 — Coming Next
-- [ ] Auto-fetch skills from GitHub URLs
+### 🔄 Phase 5 — Agent Memory (Active)
+- [x] `AgentMemory` + `ProjectSummary` DB models
+- [x] `memory-store.ts` — CRUD + prompt formatting helpers
+- [x] `memory-summarizer.ts` — AI-powered task→memory condenser (cheap model)
+- [x] `BaseAgent` saves memory after every task, injects into next reasoning prompt
+- [x] `GET/DELETE /api/memories` + bulk clear endpoint
+- [x] Dashboard memory panel on each agent card (expand, forget all)
 - [ ] Approval workflow UI for HIGH-risk tasks
-- [ ] Agent memory (context across multiple tasks)
-- [ ] Multi-project workspace switching
-- [ ] Webhook triggers (GitHub Actions, CI events)
-- [ ] Deployment rollback with one click
+- [ ] Agent-to-agent communication (Backend ↔ QA handoff)
+- [ ] GitHub webhook → issue → task auto-routing
 
 ---
 
@@ -325,6 +351,6 @@ MIT — go build something great.
 
 **Built with ❤️ & 🛡️ by QuocAnhPC**
 
-*Phase 4 Complete — 6 agents, 30+ stacks, unlimited skills, zero `rm -rf /`*
+*Phase 5 Active — 6 agents, 30+ stacks, unlimited skills, persistent memory, zero `rm -rf /`*
 
 </div>
