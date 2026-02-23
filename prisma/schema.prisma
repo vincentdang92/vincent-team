@@ -1,0 +1,335 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// 1. VPS Management
+// ============================================
+model VPS {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  ip          String
+  port        Int      @default(22)
+  username    String
+  sshKeyPath  String?  // Path to SSH private key
+  status      VPSStatus @default(DISCONNECTED)
+  
+  // Metadata
+  region      String?
+  provider    String?  // AWS, DigitalOcean, etc.
+  tags        String[] // ["production", "staging", etc.]
+  
+  // Timestamps
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  lastPingAt  DateTime?
+  
+  // Relations
+  deployments Deployment[]
+  agentLogs   AgentLog[]
+  commands    CommandHistory[]
+  
+  @@index([status])
+  @@index([ip])
+}
+
+enum VPSStatus {
+  CONNECTED
+  DISCONNECTED
+  ERROR
+  MAINTENANCE
+}
+
+// ============================================
+// 2. Agent System
+// ============================================
+model Agent {
+  id          String   @id @default(cuid())
+  name        String   @unique // "devops", "security", "backend", "frontend", "qa"
+  type        AgentType
+  status      AgentStatus @default(IDLE)
+  
+  // Configuration
+  config      Json?    // Agent-specific config
+  capabilities String[] // ["ssh", "docker", "git", etc.]
+  
+  // Timestamps
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  lastActiveAt DateTime?
+  
+  // Relations
+  logs        AgentLog[]
+  commands    CommandHistory[]
+  deployments Deployment[]
+  
+  @@index([type])
+  @@index([status])
+}
+
+enum AgentType {
+  DEVOPS
+  SECURITY
+  BACKEND
+  FRONTEND
+  QA
+  ORCHESTRATOR
+}
+
+enum AgentStatus {
+  IDLE
+  THINKING
+  EXECUTING
+  WAITING
+  ERROR
+}
+
+enum ModelProvider {
+  CLAUDE
+  GEMINI
+  DEEPSEEK
+  GPT4O
+  OLLAMA
+}
+
+// ============================================
+// 7. Task System (Orchestrator)
+// ============================================
+model Task {
+  id            String   @id @default(cuid())
+  
+  // User's original request
+  userRequest   String
+  summary       String?
+  
+  // Status tracking
+  status        TaskStatus @default(PENDING)
+  assignedRole  String?   // which agent role handled this
+  
+  // Results
+  results       String[]  // output from agent execution
+  
+  // Timestamps
+  createdAt     DateTime @default(now())
+  startedAt     DateTime?
+  completedAt   DateTime?
+  
+  // Relations
+  subTasks      SubTask[]
+  
+  @@index([status])
+  @@index([createdAt])
+}
+
+enum TaskStatus {
+  PENDING
+  THINKING
+  EXECUTING
+  SUCCESS
+  FAILED
+  WAITING_APPROVAL
+}
+
+model SubTask {
+  id          String   @id @default(cuid())
+  
+  taskId      String
+  task        Task     @relation(fields: [taskId], references: [id])
+  
+  agentRole   String   // "devops" | "backend" | "qa" | "ux"
+  description String
+  status      TaskStatus @default(PENDING)
+  results     String[]
+  
+  createdAt   DateTime @default(now())
+  completedAt DateTime?
+  
+  @@index([taskId])
+  @@index([agentRole])
+}
+
+// ============================================
+// 3. Command History & Security
+// ============================================
+model CommandHistory {
+  id          String   @id @default(cuid())
+  
+  // Command Details
+  command     String
+  rawInput    String?  // Original user input
+  sanitized   String?  // After security filter
+  
+  // Security
+  isBlocked   Boolean  @default(false)
+  blockReason String?  // Why it was blocked
+  riskLevel   RiskLevel @default(LOW)
+  
+  // Execution
+  status      CommandStatus @default(PENDING)
+  exitCode    Int?
+  stdout      String?
+  stderr      String?
+  duration    Int?     // milliseconds
+  
+  // Context
+  agent       Agent    @relation(fields: [agentId], references: [id])
+  agentId     String
+  vps         VPS?     @relation(fields: [vpsId], references: [id])
+  vpsId       String?
+  deployment  Deployment? @relation(fields: [deploymentId], references: [id])
+  deploymentId String?
+  
+  // Timestamps
+  createdAt   DateTime @default(now())
+  executedAt  DateTime?
+  completedAt DateTime?
+  
+  @@index([agentId])
+  @@index([vpsId])
+  @@index([status])
+  @@index([isBlocked])
+  @@index([createdAt])
+}
+
+enum CommandStatus {
+  PENDING
+  APPROVED
+  EXECUTING
+  SUCCESS
+  FAILED
+  BLOCKED
+  TIMEOUT
+}
+
+enum RiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+// ============================================
+// 4. Agent Logs (Real-time Stream)
+// ============================================
+model AgentLog {
+  id          String   @id @default(cuid())
+  
+  // Log Details
+  message     String
+  type        LogType  @default(INFO)
+  level       LogLevel @default(INFO)
+  
+  // Context
+  agent       Agent    @relation(fields: [agentId], references: [id])
+  agentId     String
+  vps         VPS?     @relation(fields: [vpsId], references: [id])
+  vpsId       String?
+  
+  // Metadata
+  metadata    Json?    // Additional context
+  tags        String[] // ["reasoning", "execution", "error", etc.]
+  
+  // Timestamps
+  timestamp   DateTime @default(now())
+  
+  @@index([agentId])
+  @@index([vpsId])
+  @@index([type])
+  @@index([timestamp])
+}
+
+enum LogType {
+  INFO
+  WARN
+  ERROR
+  SUCCESS
+  REASONING  // Agent's thought process
+  EXECUTION  // Command execution
+  SECURITY   // Security alerts
+}
+
+enum LogLevel {
+  DEBUG
+  INFO
+  WARN
+  ERROR
+  CRITICAL
+}
+
+// ============================================
+// 5. Deployment Management
+// ============================================
+model Deployment {
+  id          String   @id @default(cuid())
+  
+  // Project Details
+  projectName String
+  repository  String?
+  branch      String?
+  commitHash  String?
+  
+  // Status
+  status      DeploymentStatus @default(PENDING)
+  progress    Int      @default(0) // 0-100
+  
+  // Context
+  agent       Agent    @relation(fields: [agentId], references: [id])
+  agentId     String
+  vps         VPS      @relation(fields: [vpsId], references: [id])
+  vpsId       String
+  
+  // Execution
+  commands    CommandHistory[]
+  logs        String?  // Consolidated logs
+  errorMessage String?
+  
+  // Timestamps
+  createdAt   DateTime @default(now())
+  startedAt   DateTime?
+  completedAt DateTime?
+  
+  @@index([agentId])
+  @@index([vpsId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+enum DeploymentStatus {
+  PENDING
+  PREPARING
+  BUILDING
+  DEPLOYING
+  SUCCESS
+  FAILED
+  ROLLBACK
+}
+
+// ============================================
+// 6. System Metrics (Optional for Phase 1)
+// ============================================
+model SystemMetric {
+  id          String   @id @default(cuid())
+  
+  vpsId       String
+  
+  // Metrics
+  cpuUsage    Float?
+  memoryUsage Float?
+  diskUsage   Float?
+  networkIn   Float?
+  networkOut  Float?
+  
+  // Timestamp
+  timestamp   DateTime @default(now())
+  
+  @@index([vpsId])
+  @@index([timestamp])
+}
