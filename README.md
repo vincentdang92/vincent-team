@@ -1,83 +1,175 @@
-# 🛡️ AI DevOps Guardian - Phase 1
+# 🛡️ AI DevOps Guardian
 
-> **AI-Managed Infrastructure with Zero-Trust Security**
+<div align="center">
 
-An autonomous Multi-Agent system for managing VPS, deployments, and CI/CD pipelines with military-grade security validation.
+**The world's most paranoid, stack-aware, skill-powered AI team for your codebase.**
 
-![Status](https://img.shields.io/badge/Status-Phase%201%20Complete-success)
-![Node](https://img.shields.io/badge/Node-v20.11.0-blue)
-![Next.js](https://img.shields.io/badge/Next.js-15-black)
-![TypeScript](https://img.shields.io/badge/TypeScript-5.6-blue)
+[![Phase](https://img.shields.io/badge/Phase-4%20Complete-blueviolet?style=for-the-badge)](.)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.6-blue?style=for-the-badge&logo=typescript)](.)
+[![Next.js](https://img.shields.io/badge/Next.js-15-black?style=for-the-badge&logo=next.js)](.)
+[![Prisma](https://img.shields.io/badge/Prisma-6-2D3748?style=for-the-badge&logo=prisma)](.)
+[![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](.)
 
----
-
-## 🎯 Vision
-
-Build a **"Hệ thần kinh trung ương"** (Central Nervous System) for an AI Team where agents autonomously manage infrastructure while maintaining **absolute safety** through multi-layer security validation.
+</div>
 
 ---
 
-## ✨ Features
+## 🧠 What Is This?
 
-### 🛡️ Security First
-- **Guardian Filter**: Multi-layer validation (Sanitization → Obfuscation Detection → Pattern Matching → Risk Scoring)
-- **Risk Levels**: CRITICAL (auto-block), HIGH (require approval), MEDIUM (log & allow)
-- **Audit Trail**: Complete command history including blocked attempts
-- **Obfuscation Detection**: Catches base64, hex, and variable expansion tricks
+AI DevOps Guardian is a **fully autonomous multi-agent AI team** that manages your software projects end-to-end — from writing code to deploying on production VPS — with **military-grade security** that blocks catastrophic commands before they run.
 
-### 🤖 Multi-Agent System
-- **DevOps Agent**: SSH & Docker operations
-- **Security Guardian**: Command validation
-- **Backend/Frontend/QA Agents**: Coming in Phase 2
-- **Reasoning Logs**: See agent's thought process in real-time
+You describe what you want. The Orchestrator routes the task to the right specialist. The specialist reasons, plans, executes, and reports back. All guarded by a paranoid Security Guardian that intercepts every shell command before it touches your servers.
 
-### 📊 Real-time Dashboard
-- **Cyberpunk UI**: Dark theme with glow effects
-- **The War Room**: Command center with live terminal
-- **Agent Monitoring**: Status tracking for all agents
-- **Socket.io**: Real-time log streaming
+Think of it as hiring 6 elite senior engineers — except they never sleep, never cut corners, and literally cannot run `rm -rf /`.
 
-### 🏗️ Production-Ready Stack
-- Next.js 15 (App Router)
-- Prisma + PostgreSQL
-- Socket.io
-- Zustand
-- TypeScript
-- Tailwind CSS
+---
+
+## 👥 The Team
+
+| Agent | Emoji | Speciality | Tools |
+|---|---|---|---|
+| **Orchestrator** | 🧠 | Reads your request, classifies the task, routes to the right agent | Reasoning, Planning |
+| **DevOps Senior** | ⚙️ | SSH, Docker, Nginx, CI/CD, systemd, server health | `ssh-execute`, `docker-run` |
+| **Backend Senior** | 🛠️ | REST APIs, DB schemas, auth, business logic, CRUD | `file-write`, `file-read` |
+| **QA Senior** | 🧪 | Test writing, code review, coverage, bug reproduction | `file-write`, `run-tests` |
+| **UX Senior** | 🎨 | React components, accessibility, animations, responsive layouts | `file-write`, `list-dir` |
+| **Security Guardian** | 🛡️ | Validates every shell command. Blocks CRITICAL. Logs HIGH. | Pattern matching, risk scoring |
+
+Every agent:
+- Has a **dynamic system prompt** built from your project's tech stack
+- **Injects your custom skills** from the Skills Library at prompt time
+- Follows a **reason → plan → execute** loop before touching anything
+
+---
+
+## 🌟 Key Features
+
+### 🔐 Zero-Trust Security Guardian
+Every SSH/Docker command passes through a 4-layer filter:
+
+```
+Command → Sanitize → Obfuscation Detection → Pattern Match → Risk Score → Verdict
+```
+
+| Risk | Action | Example |
+|---|---|---|
+| `CRITICAL (100)` | **Auto-blocked, logged** | `rm -rf /`, fork bombs, disk wipes |
+| `HIGH (75+)` | **Blocked, requires approval** | `chmod 777 /etc`, system shutdown |
+| `MEDIUM (40+)` | **Allowed, audited** | `npm install -g`, `chmod 777 /tmp` |
+| `LOW (0-39)` | **Allowed** | `ls -la`, `docker ps`, `git status` |
+
+Even obfuscated attacks are caught:
+```bash
+echo "cm0gLXJmIC8=" | base64 -d | bash  # ❌ BLOCKED — obfuscation detected
+$(rm -rf /)                              # ❌ BLOCKED — command substitution detected
+```
+
+---
+
+### 📦 Stack-Aware Prompts
+Every agent's system prompt is **generated dynamically** from your project's configured technology stack. A backend agent working on a Laravel + MySQL project gets completely different expertise than one working on NestJS + Prisma.
+
+Supported stack categories:
+
+| Category | Options |
+|---|---|
+| **Frontend** | React, Vue, Svelte, Next.js, Nuxt, Angular, Astro |
+| **Backend** | Express, NestJS, FastAPI, Laravel, Django, Rails, Go Fiber, Hono |
+| **Database** | PostgreSQL, MySQL, MongoDB, SQLite, Supabase, Redis |
+| **Testing** | Vitest, Jest, PyTest, Playwright, Cypress |
+| **Deploy** | Docker, Kubernetes, PM2, Nginx, Vercel, Railway, Fly.io |
+| **Mobile** | React Native, Flutter, Swift, Kotlin, Capacitor |
+
+---
+
+### 🧠 Custom Skills (Phase 4)
+Install expert knowledge directly into any agent's brain from platforms like [SkillsMP.com](https://skillsmp.com).
+
+1. Paste a `SKILL.md` content into the Dashboard → **Skills** tab
+2. Assign it to a specific agent (`devops`, `backend`, `qa`, `ux`) or **all agents**
+3. Set priority (Normal / High / Critical)
+4. The skill is **injected into the agent's system prompt** on every single task — forever
+
+```
+[Skill: Kubernetes Expert] → injected into DevOps prompt
+[Skill: TDD Master]        → injected into QA prompt
+[Skill: WCAG Specialist]   → injected into UX prompt
+[Skill: SQL Optimizer]     → injected into Backend prompt
+```
+
+Skills are stored in the database, toggled on/off in real-time, no server restart needed.
+
+---
+
+### 📊 Real-Time Dashboard
+Dark cyberpunk command center with four tabs:
+
+- **👥 Team** — Live status of all 6 agents, model switcher per agent, stack stack badges
+- **📋 Tasks** — Task history, status tracking (`THINKING → EXECUTING → SUCCESS`)
+- **📡 Logs** — Real-time agent reasoning stream (what they're actually thinking)
+- **🧠 Skills** — Skill library management with paste form, toggle, and delete
+
+Switch AI model per agent at runtime: **Claude, Gemini, GPT-4o, DeepSeek, Ollama**
+
+---
+
+### 🏗️ Multi-Model Support
+```typescript
+// Each agent can run a different AI provider
+DevOps Agent    → Claude 3.5 Sonnet (complex reasoning)
+Backend Agent   → Gemini 2.0 Flash (fast code generation)
+QA Agent        → DeepSeek Coder (specialized)
+UX Agent        → GPT-4o (design reasoning)
+Orchestrator    → Ollama/Llama3 (local, fast routing)
+```
 
 ---
 
 ## 🚀 Quick Start
 
 ### Prerequisites
-- Node.js v20.11.0+
+- Node.js v20+
 - PostgreSQL database
-- SSH access to a VPS (for testing)
+- (Optional) SSH access to a VPS
 
-### Installation
+### Setup
 
 ```bash
-# Clone the repository
-cd ai-devops-guardian
-
-# Install dependencies
+# 1. Install dependencies
 npm install
 
-# Setup environment
+# 2. Set up environment
 cp .env.example .env
-# Edit .env and set your DATABASE_URL
+# Fill in DATABASE_URL and at least one AI provider key
 
-# Generate Prisma Client
+# 3. Init database
 npx prisma generate
+npx prisma db push
 
-# Run database migrations
-npx prisma migrate dev --name init
-
-# Start development server
+# 4. Start
 npm run dev
 ```
 
-Visit: **http://localhost:3000**
+Open [http://localhost:3000/dashboard](http://localhost:3000/dashboard)
+
+---
+
+### Environment Variables
+
+```env
+DATABASE_URL="postgresql://user:password@localhost:5432/ai_guardian"
+NEXT_PUBLIC_APP_URL="http://localhost:3000"
+
+# At least one AI provider
+ANTHROPIC_API_KEY="sk-ant-..."
+GOOGLE_GENERATIVE_AI_API_KEY="..."
+OPENAI_API_KEY="sk-..."
+DEEPSEEK_API_KEY="..."
+
+# For local models (optional)
+OLLAMA_BASE_URL="http://localhost:11434"
+OLLAMA_MODEL="llama3.1"
+```
 
 ---
 
@@ -86,214 +178,153 @@ Visit: **http://localhost:3000**
 ```
 ai-devops-guardian/
 ├── prisma/
-│   └── schema.prisma              # Database schema (6 models)
+│   └── schema.prisma              # 8 models: VPS, Agent, Task, SubTask,
+│                                  #   AgentLog, CommandHistory, Project, AgentSkill
 ├── src/
 │   ├── agents/
-│   │   ├── devops/                # DevOps Agent
-│   │   └── security/              # Guardian Filter
-│   ├── tools/
-│   │   ├── ssh/                   # SSH manager
-│   │   └── docker/                # Docker templates
+│   │   ├── base.agent.ts          # Abstract base with reason→plan→execute loop
+│   │   ├── orchestrator/          # 🧠 Task router & planner
+│   │   ├── devops/                # ⚙️ SSH + Docker specialist
+│   │   ├── backend/               # 🛠️ API + DB specialist
+│   │   ├── qa/                    # 🧪 Testing specialist
+│   │   ├── ux/                    # 🎨 UI/UX specialist
+│   │   └── security/              # 🛡️ Guardian filter (always on)
 │   ├── lib/
-│   │   ├── prisma.ts              # Prisma client
-│   │   └── socket.ts              # Socket.io server
-│   ├── store/                     # Zustand stores
-│   ├── types/                     # TypeScript types
+│   │   ├── model-router.ts        # Multi-provider AI abstraction
+│   │   ├── model-config.ts        # Per-agent model config (DB-backed)
+│   │   ├── prompt-builder.ts      # Async stack-aware + skill-injecting prompt builder
+│   │   ├── skill-loader.ts        # Fetches active AgentSkills from DB at prompt time
+│   │   ├── stack-library.ts       # 30+ tech options across 6 categories
+│   │   └── project-config.ts      # Project ↔ stack config resolver
+│   ├── tools/
+│   │   └── ssh/                   # SSH execution tool (guarded)
 │   └── app/
-│       ├── api/                   # API routes
-│       └── dashboard/             # Dashboard UI
-└── .env.example
+│       ├── api/
+│       │   ├── tasks/             # POST /api/tasks → triggers orchestrator
+│       │   ├── agents/[id]/model  # PATCH → switch AI model per agent
+│       │   ├── projects/          # CRUD for projects with stack config
+│       │   └── skills/            # CRUD for AgentSkills
+│       └── dashboard/             # The War Room (4-tab cyberpunk UI)
 ```
 
 ---
 
-## 🔒 Security Guardian Filter
+## 🔌 API Reference
 
-### Blocked Commands (CRITICAL - Risk 100)
-
+### Submit a Task
 ```bash
-rm -rf /                           # ❌ BLOCKED
-dd if=/dev/zero of=/dev/sda        # ❌ BLOCKED
-shutdown -h now                    # ❌ BLOCKED
-:(){ :|:& };:                      # ❌ BLOCKED (fork bomb)
-echo "cm0gLXJmIC8=" | base64 -d | bash  # ❌ BLOCKED (obfuscated)
+POST /api/tasks
+{ "userRequest": "Deploy the API to production", "projectId": "proj_..." }
 ```
 
-### Allowed Commands (LOW Risk)
-
+### Manage Skills
 ```bash
-ls -la                             # ✅ ALLOWED
-docker ps                          # ✅ ALLOWED
-git status                         # ✅ ALLOWED
+GET    /api/skills               # List all skills (filter by ?agentRole=devops)
+POST   /api/skills               # Install new skill
+PATCH  /api/skills/:id           # Toggle active, update priority
+DELETE /api/skills/:id           # Remove skill
 ```
 
-### Monitored Commands (MEDIUM Risk)
-
+### Manage Projects
 ```bash
-chmod 777 /tmp/file                # ⚠️ ALLOWED (logged)
-npm install -g package             # ⚠️ ALLOWED (logged)
+GET    /api/projects             # List projects
+POST   /api/projects             # Create project with stack config
+PATCH  /api/projects/:id         # Update stack
 ```
 
----
-
-## 🎨 Dashboard UI
-
-### Landing Page
-- Feature showcase
-- Animated gradient background
-- System status indicators
-
-### The War Room
-- **Agent Status Panel**: Monitor all agents
-- **Terminal**: Execute commands with live output
-- **Security Alerts**: Real-time incident tracking
-- **Recent Activity**: Activity feed
-
----
-
-## 📊 Database Schema
-
-6 models for complete infrastructure management:
-
-1. **VPS**: Server connections (IP, SSH keys, status)
-2. **Agent**: Multi-agent system (DevOps, Security, etc.)
-3. **CommandHistory**: Audit trail with security validation
-4. **AgentLog**: Real-time reasoning and execution logs
-5. **Deployment**: Deployment tracking with progress
-6. **SystemMetric**: Resource monitoring (CPU, RAM, disk)
-
----
-
-## 🔌 API Endpoints
-
-### Execute Command
+### Switch Agent Model
 ```bash
-POST /api/execute
-{
-  "command": "ls -la",
-  "vpsId": "vps-id",
-  "agentId": "devops-default"
-}
-```
-
-### VPS Management
-```bash
-GET  /api/vps           # List all VPS
-POST /api/vps           # Create VPS
-```
-
-### Agent Logs
-```bash
-GET /api/agents/:id/logs?limit=100&type=REASONING
+PATCH /api/agents/:id/model
+{ "provider": "GEMINI" }       # CLAUDE | GEMINI | GPT4O | DEEPSEEK | OLLAMA
 ```
 
 ---
 
-## 🧪 Testing
+## 🏛️ Architecture
 
-### Test Security Filter
-
-```bash
-# Safe command
-curl -X POST http://localhost:3000/api/execute \
-  -H "Content-Type: application/json" \
-  -d '{"command": "ls -la", "vpsId": "your-vps-id"}'
-
-# Dangerous command (will be blocked)
-curl -X POST http://localhost:3000/api/execute \
-  -H "Content-Type: application/json" \
-  -d '{"command": "rm -rf /", "vpsId": "your-vps-id"}'
+```
+User Request
+     │
+     ▼
+┌─────────────────────────────────────────────────┐
+│                  Orchestrator                    │
+│  ┌────────────────────────────────────────────┐ │
+│  │ Project Stack + Active Skills → Prompt     │ │
+│  │ Classify → Route → Plan                   │ │
+│  └────────────────────────────────────────────┘ │
+└──┬────────┬──────────────┬──────────┬───────────┘
+   │        │              │          │
+   ▼        ▼              ▼          ▼
+DevOps   Backend          QA         UX
+Agent    Agent           Agent      Agent
+   │        │              │          │
+   │   [Stack Prompt + Injected Skills]
+   │        │              │          │
+   ▼        ▼              ▼          ▼
+┌─────────────────────────────────────────────────┐
+│            🛡️ Security Guardian Filter           │
+│        Validate → Risk Score → Allow/Block       │
+└─────────────────────────────────────────────────┘
+         │
+         ▼
+    SSH / Docker / File System / Test Runner
 ```
 
 ---
 
-## 🛠️ Development
+## 📈 Roadmap
 
-### Add New Agent
+### ✅ Phase 1 — Foundation
+- Security Guardian filter (4-layer, CRITICAL auto-block)
+- DevOps Agent with SSH + Docker tools
+- Prisma schema, API routes, Dashboard UI
 
-1. Create agent file: `src/agents/[agent-name]/[agent-name].agent.ts`
-2. Implement `IAgent` interface
-3. Add to database: `AgentType` enum in Prisma schema
-4. Register in API routes
+### ✅ Phase 2 — Full Team
+- BaseAgent with reason → plan → execute loop
+- Backend, QA, UX Senior agents
+- Orchestrator with keyword-based task routing
+- Multi-model support (Claude, Gemini, GPT-4o, DeepSeek, Ollama)
+- Real-time Socket.io log streaming
 
-### Add New Tool
+### ✅ Phase 3 — Stack Intelligence
+- 30+ technology options across 6 stack categories
+- Project wizard with stack selection
+- Dynamic stack-aware system prompts per agent
+- Per-agent AI model switching from the dashboard
 
-1. Create tool file: `src/tools/[tool-name]/[tool-name].tool.ts`
-2. Implement tool logic
-3. Import in agent
+### ✅ Phase 4 — Custom Skills
+- `AgentSkill` DB model with role targeting and priority
+- Full CRUD API (`/api/skills`)
+- `skill-loader.ts` — DB skills injected at prompt build time
+- Dashboard **🧠 Skills** tab with paste form, toggle, delete
+- Support for [SkillsMP.com](https://skillsmp.com) skill format
 
----
-
-## 📝 Environment Variables
-
-```env
-# Database
-DATABASE_URL="postgresql://user:password@localhost:5432/ai_devops_guardian"
-
-# Next.js
-NEXT_PUBLIC_APP_URL="http://localhost:3000"
-
-# Socket.io
-NEXT_PUBLIC_SOCKET_URL="http://localhost:3000"
-
-# SSH Keys (optional)
-SSH_KEYS_DIR="./ssh-keys"
-```
-
----
-
-## 🔜 Roadmap
-
-### Phase 1 (Current) ✅
-- [x] Prisma schema
-- [x] Security Guardian Filter
-- [x] DevOps Agent
-- [x] API routes
-- [x] Dashboard UI
-
-### Phase 2 (Next)
-- [ ] Backend Agent (API deployment)
-- [ ] Frontend Agent (UI deployment)
-- [ ] QA Agent (automated testing)
-- [ ] Orchestrator Agent (multi-agent coordination)
-- [ ] Approval workflow for HIGH-risk commands
-
-### Phase 3 (Future)
-- [ ] CI/CD pipeline integration
-- [ ] Multi-user support
-- [ ] Role-based access control
-- [ ] Deployment rollback
-- [ ] Advanced monitoring & alerting
+### 🔜 Phase 5 — Coming Next
+- [ ] Auto-fetch skills from GitHub URLs
+- [ ] Approval workflow UI for HIGH-risk tasks
+- [ ] Agent memory (context across multiple tasks)
+- [ ] Multi-project workspace switching
+- [ ] Webhook triggers (GitHub Actions, CI events)
+- [ ] Deployment rollback with one click
 
 ---
 
 ## 🤝 Contributing
 
-This is a personal project, but feedback is welcome!
+PRs welcome. Start by opening an issue to discuss what you'd like to add.
 
 ---
 
 ## 📄 License
 
-MIT License
+MIT — go build something great.
 
 ---
 
-## 🙏 Acknowledgments
+<div align="center">
 
-Built with inspiration from:
-- LangGraph.js (Multi-Agent orchestration)
-- DevOps best practices
-- Zero-trust security principles
+**Built with ❤️ & 🛡️ by QuocAnhPC**
 
----
+*Phase 4 Complete — 6 agents, 30+ stacks, unlimited skills, zero `rm -rf /`*
 
-## 📞 Contact
-
-For questions or feedback, please open an issue.
-
----
-
-**Built with ❤️ by QuocAnhPC**
-
-**Status:** Phase 1 Complete 🎉
+</div>
