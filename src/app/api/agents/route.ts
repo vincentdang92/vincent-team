@@ -49,6 +49,10 @@ export async function GET() {
         // Mask the apiKey before sending to client
         const sanitized = agents.map(a => {
             const cfg = (a.config as Record<string, unknown> | null) ?? {};
+            const rawKey = cfg.apiKey as string | undefined;
+            const keyHint = rawKey && rawKey.length >= 8
+                ? `${rawKey.slice(0, 4)}••••••••${rawKey.slice(-4)}`
+                : rawKey ? '••••••••' : null;
             return {
                 id: a.id,
                 name: a.name,
@@ -58,7 +62,8 @@ export async function GET() {
                     provider: cfg.provider ?? null,
                     model: cfg.model ?? null,
                     temperature: cfg.temperature ?? null,
-                    hasApiKey: !!cfg.apiKey, // boolean only — never expose the raw key
+                    hasApiKey: !!rawKey,  // boolean only — never expose the raw key
+                    keyHint,             // safe partial preview e.g. "sk-a••••••••b3f2"
                 },
             };
         });

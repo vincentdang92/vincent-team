@@ -28,6 +28,7 @@ interface AgentInfo {
     provider: ModelProvider;
     model: string | null;       // specific model variant saved in DB
     hasApiKey: boolean;         // true if a custom API key is saved in DB
+    keyHint: string | null;     // e.g. "sk-a••••••••b3f2" — safe partial preview
     capabilities: string[];
 }
 
@@ -73,7 +74,7 @@ interface LogEntry {
 }
 
 // ── Config ────────────────────────────────────────────────────────────────────
-const AGENTS: Omit<AgentInfo, 'status' | 'provider' | 'model' | 'hasApiKey'>[] = [
+const AGENTS: Omit<AgentInfo, 'status' | 'provider' | 'model' | 'hasApiKey' | 'keyHint'>[] = [
     { id: 'devops', name: 'DevOps Senior', role: 'devops', capabilities: ['SSH', 'Docker', 'Deploy'] },
     { id: 'backend', name: 'Backend Senior', role: 'backend', capabilities: ['API', 'Database', 'Auth'] },
     { id: 'qa', name: 'QA Senior', role: 'qa', capabilities: ['Vitest', 'Playwright', 'Bugs'] },
@@ -169,7 +170,7 @@ const STACK_CATEGORIES: StackCategory[] = ['frontend', 'backend', 'database', 't
 // ── Main Dashboard ─────────────────────────────────────────────────────────────
 export default function DashboardPage() {
     const [agents, setAgents] = useState<AgentInfo[]>(
-        AGENTS.map(a => ({ ...a, status: 'IDLE', provider: 'GEMINI', model: 'gemini-2.0-flash', hasApiKey: false }))
+        AGENTS.map(a => ({ ...a, status: 'IDLE', provider: 'GEMINI', model: 'gemini-2.0-flash', hasApiKey: false, keyHint: null }))
     );
     const [projects, setProjects] = useState<Project[]>([]);
     const [activeProject, setActiveProject] = useState<Project | null>(null);
@@ -250,7 +251,7 @@ export default function DashboardPage() {
         fetch('/api/agents')
             .then(r => r.json())
             .then(d => {
-                const dbAgents: { name: string; config: { provider: string | null; model: string | null; hasApiKey: boolean } }[] = d.agents ?? [];
+                const dbAgents: { name: string; config: { provider: string | null; model: string | null; hasApiKey: boolean; keyHint: string | null } }[] = d.agents ?? [];
                 setAgents(prev => prev.map(a => {
                     const saved = dbAgents.find(db => db.name === a.role);
                     if (!saved || !saved.config.provider) return a;
@@ -259,6 +260,7 @@ export default function DashboardPage() {
                         provider: saved.config.provider as ModelProvider,
                         model: saved.config.model,
                         hasApiKey: saved.config.hasApiKey,
+                        keyHint: saved.config.keyHint ?? null,
                     };
                 }));
             })
@@ -326,7 +328,13 @@ export default function DashboardPage() {
         apiKey?: string
     ) => {
         setAgents(prev => prev.map(a => a.id === agentId
-            ? { ...a, provider, model: model ?? null, hasApiKey: apiKey !== undefined ? !!apiKey : a.hasApiKey }
+            ? {
+                ...a,
+                provider,
+                model: model ?? null,
+                hasApiKey: apiKey !== undefined ? !!apiKey : a.hasApiKey,
+                keyHint: apiKey ? `${apiKey.slice(0, 4)}\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022${apiKey.slice(-4)}` : a.keyHint,
+            }
             : a
         ));
         try {
@@ -881,8 +889,13 @@ function AgentCard({
             <div className="space-y-2 border-t border-gray-800 pt-3">
                 <div className="flex items-center justify-between">
                     <label className="text-xs text-gray-500">LLM Provider</label>
-                    {agent.hasApiKey && (
-                        <span className="text-xs px-1.5 py-0.5 rounded-full bg-green-900/40 text-green-400">🔑 Key saved</span>
+                    {agent.hasApiKey ? (
+                        <span className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-green-900/30 border border-green-800/40 text-green-400 font-mono tracking-wider">
+                            <span>🔑</span>
+                            <span>{agent.keyHint ?? '••••••••••••••••'}</span>
+                        </span>
+                    ) : (
+                        <span className="text-xs px-1.5 py-0.5 rounded-full bg-gray-800 text-gray-600">no key</span>
                     )}
                 </div>
 
