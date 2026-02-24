@@ -27,6 +27,7 @@ export async function getAgentModelConfig(agentId: string): Promise<ModelConfig>
     return {
         provider: cfg.provider as ModelProvider,
         model: cfg.model as string | undefined,
+        apiKey: cfg.apiKey as string | undefined,   // ← include saved key
         temperature: cfg.temperature as number | undefined,
         maxTokens: cfg.maxTokens as number | undefined,
     };

@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { STACK_LIBRARY, StackConfig, StackCategory, getStackOptions, DEFAULT_STACK } from '@/lib/stack-library';
 import { formatStackSummary } from '@/lib/prompt-builder';
+import { MODEL_CATALOG, ModelOption } from '@/lib/model-router';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type ModelProvider = 'CLAUDE' | 'GEMINI' | 'DEEPSEEK' | 'GPT4O' | 'OLLAMA';
@@ -25,6 +26,8 @@ interface AgentInfo {
     role: AgentRole;
     status: AgentStatus;
     provider: ModelProvider;
+    model: string | null;       // specific model variant saved in DB
+    hasApiKey: boolean;         // true if a custom API key is saved in DB
     capabilities: string[];
 }
 
@@ -70,7 +73,7 @@ interface LogEntry {
 }
 
 // ── Config ────────────────────────────────────────────────────────────────────
-const AGENTS: Omit<AgentInfo, 'status' | 'provider'>[] = [
+const AGENTS: Omit<AgentInfo, 'status' | 'provider' | 'model' | 'hasApiKey'>[] = [
     { id: 'devops', name: 'DevOps Senior', role: 'devops', capabilities: ['SSH', 'Docker', 'Deploy'] },
     { id: 'backend', name: 'Backend Senior', role: 'backend', capabilities: ['API', 'Database', 'Auth'] },
     { id: 'qa', name: 'QA Senior', role: 'qa', capabilities: ['Vitest', 'Playwright', 'Bugs'] },
@@ -119,12 +122,54 @@ const MODEL_OPTIONS: { value: ModelProvider; label: string }[] = [
     { value: 'OLLAMA', label: 'Ollama (Local)' },
 ];
 
+// ── Skeleton Components ────────────────────────────────────────────────────────
+function SkeletonCard() {
+    return (
+        <div className="bg-gray-900/60 border border-gray-800 rounded-xl p-5 space-y-4 animate-pulse">
+            <div className="flex items-start justify-between">
+                <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-lg bg-gray-800" />
+                    <div className="space-y-2">
+                        <div className="h-3 w-28 bg-gray-800 rounded-full" />
+                        <div className="h-2 w-16 bg-gray-800/60 rounded-full" />
+                    </div>
+                </div>
+                <div className="flex items-center gap-1.5">
+                    <div className="w-2 h-2 rounded-full bg-gray-800" />
+                    <div className="h-2 w-8 bg-gray-800 rounded-full" />
+                </div>
+            </div>
+            <div className="flex gap-1.5">
+                {[40, 56, 36].map(w => <div key={w} className="h-5 bg-gray-800 rounded-full" style={{ width: w }} />)}
+            </div>
+            <div className="space-y-2 border-t border-gray-800 pt-3">
+                <div className="h-2.5 w-20 bg-gray-800 rounded-full" />
+                <div className="h-8 w-full bg-gray-800 rounded-lg" />
+                <div className="h-7 w-full bg-gray-800/60 rounded-lg" />
+            </div>
+        </div>
+    );
+}
+
+function SkeletonRow() {
+    return (
+        <div className="bg-gray-900/60 border border-gray-800 rounded-xl p-4 animate-pulse flex items-center gap-4">
+            <div className="w-8 h-8 rounded-lg bg-gray-800 flex-shrink-0" />
+            <div className="flex-1 space-y-2">
+                <div className="h-3 w-1/2 bg-gray-800 rounded-full" />
+                <div className="h-2 w-1/3 bg-gray-800/60 rounded-full" />
+            </div>
+            <div className="h-5 w-16 bg-gray-800 rounded-full" />
+        </div>
+    );
+}
+
 const STACK_CATEGORIES: StackCategory[] = ['frontend', 'backend', 'database', 'testing', 'deploy', 'mobile'];
 
 // ── Main Dashboard ─────────────────────────────────────────────────────────────
 export default function DashboardPage() {
     const [agents, setAgents] = useState<AgentInfo[]>(
-        AGENTS.map(a => ({ ...a, status: 'IDLE', provider: 'CLAUDE' }))
+        AGENTS.map(a => ({ ...a, status: 'IDLE', provider: 'GEMINI', model: 'gemini-2.0-flash', hasApiKey: false }))
     );
     const [projects, setProjects] = useState<Project[]>([]);
     const [activeProject, setActiveProject] = useState<Project | null>(null);
@@ -137,26 +182,59 @@ export default function DashboardPage() {
     const [showProjectWizard, setShowProjectWizard] = useState(false);
     // memories: keyed by agentRole
     const [memories, setMemories] = useState<Record<string, AgentMemory[]>>({});
+    // skills keyed by agentRole (for per-card display)
+    const [agentSkills, setAgentSkills] = useState<Record<string, AgentSkill[]>>({});
     const [expandedMemory, setExpandedMemory] = useState<string | null>(null);
     // Skill form state
     const [skillForm, setSkillForm] = useState({
         name: '', description: '', agentRole: 'all', content: '', sourceUrl: '', priority: 0,
     });
     const [skillSaving, setSkillSaving] = useState(false);
+    const [isLoadingAgents, setIsLoadingAgents] = useState(true);
+    const [isLoadingTasks, setIsLoadingTasks] = useState(true);
     const logsEndRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => { logsEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [logs]);
 
-    // Load projects, tasks, and skills on mount
+    // Load projects, tasks, skills, memories, and agent configs on mount
     useEffect(() => {
         fetch('/api/projects').then(r => r.json()).then(d => {
             const list = d.projects ?? [];
             setProjects(list);
             if (list.length > 0) setActiveProject(list[0]);
         }).catch(() => { });
-        fetch('/api/tasks').then(r => r.json()).then(d => setTasks(d.tasks ?? [])).catch(() => { });
-        fetch('/api/skills').then(r => r.json()).then(d => setSkills(d.skills ?? [])).catch(() => { });
-        // Load memories grouped by agentRole
+
+        fetch('/api/tasks')
+            .then(r => r.json())
+            .then(d => setTasks(d.tasks ?? []))
+            .catch(() => { })
+            .finally(() => setIsLoadingTasks(false));
+
+        fetch('/api/skills')
+            .then(r => r.json())
+            .then(d => {
+                const allSkills: AgentSkill[] = d.skills ?? [];
+                setSkills(allSkills);
+                // Group into per-role buckets (limited to top 10 by priority each)
+                const grouped: Record<string, AgentSkill[]> = {};
+                for (const s of allSkills) {
+                    const roles = s.agentRole === 'all'
+                        ? ['devops', 'backend', 'qa', 'ux', 'security', 'orchestrator']
+                        : [s.agentRole];
+                    for (const role of roles) {
+                        if (!grouped[role]) grouped[role] = [];
+                        grouped[role].push(s);
+                    }
+                }
+                // Sort each bucket by priority desc and cap at 10
+                Object.keys(grouped).forEach(role => {
+                    grouped[role] = grouped[role]
+                        .sort((a, b) => b.priority - a.priority)
+                        .slice(0, 10);
+                });
+                setAgentSkills(grouped);
+            })
+            .catch(() => { });
         fetch('/api/memories')
             .then(r => r.json())
             .then(d => {
@@ -168,7 +246,47 @@ export default function DashboardPage() {
                 setMemories(grouped);
             })
             .catch(() => { });
+        // ── Load persisted agent model configs from DB ──────────────────────────────
+        fetch('/api/agents')
+            .then(r => r.json())
+            .then(d => {
+                const dbAgents: { name: string; config: { provider: string | null; model: string | null; hasApiKey: boolean } }[] = d.agents ?? [];
+                setAgents(prev => prev.map(a => {
+                    const saved = dbAgents.find(db => db.name === a.role);
+                    if (!saved || !saved.config.provider) return a;
+                    return {
+                        ...a,
+                        provider: saved.config.provider as ModelProvider,
+                        model: saved.config.model,
+                        hasApiKey: saved.config.hasApiKey,
+                    };
+                }));
+            })
+            .catch(() => { })
+            .finally(() => setIsLoadingAgents(false));
     }, []);
+
+    // ── Real-time task polling ─────────────────────────────────────────────────
+    // Poll every 3s while any task is still in-progress
+    const IN_PROGRESS: TaskStatus[] = ['PENDING', 'THINKING', 'EXECUTING'];
+    useEffect(() => {
+        const hasLive = tasks.some(t => IN_PROGRESS.includes(t.status));
+        if (!hasLive) return;
+
+        const timer = setInterval(async () => {
+            try {
+                const res = await fetch('/api/tasks?limit=50');
+                const data = await res.json();
+                const fresh: Task[] = data.tasks ?? [];
+                setTasks(prev => prev.map(old => {
+                    const updated = fresh.find(f => f.id === old.id);
+                    return updated ?? old;
+                }));
+            } catch { /* silent — keeps polling */ }
+        }, 3000);
+
+        return () => clearInterval(timer);
+    }, [tasks]);
 
     const addLog = useCallback((roleName: string, message: string, type = 'INFO') => {
         setLogs(prev => [...prev.slice(-199), {
@@ -201,16 +319,51 @@ export default function DashboardPage() {
         finally { setIsSubmitting(false); }
     };
 
-    const handleModelSwitch = async (agentId: string, provider: ModelProvider) => {
-        setAgents(prev => prev.map(a => a.id === agentId ? { ...a, provider } : a));
+    const handleModelSwitch = async (
+        agentId: string,
+        provider: ModelProvider,
+        model?: string | null,
+        apiKey?: string
+    ) => {
+        setAgents(prev => prev.map(a => a.id === agentId
+            ? { ...a, provider, model: model ?? null, hasApiKey: apiKey !== undefined ? !!apiKey : a.hasApiKey }
+            : a
+        ));
         try {
+            const payload: Record<string, unknown> = { provider };
+            if (model) payload.model = model;
+            if (apiKey !== undefined) payload.apiKey = apiKey;
             await fetch(`/api/agents/${agentId}/model`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ provider }),
+                body: JSON.stringify(payload),
             });
-            addLog(agentId, `🔄 Switched to ${provider}`);
+            addLog(agentId, `🔄 Switched to ${provider}${model ? ` / ${model}` : ''}${apiKey ? ' + key saved' : ''}`);
         } catch { addLog(agentId, '❌ Model switch failed', 'ERROR'); }
+    };
+
+    // Apply one agent's provider+model to every other agent simultaneously
+    const handleApplyToAll = async (sourceAgentId: string) => {
+        const source = agents.find(a => a.id === sourceAgentId);
+        if (!source) return;
+        const others = agents.filter(a => a.id !== sourceAgentId);
+        // Optimistic update
+        setAgents(prev => prev.map(a =>
+            a.id === sourceAgentId ? a : { ...a, provider: source.provider, model: source.model }
+        ));
+        // Persist all in parallel
+        await Promise.allSettled(
+            others.map(a => {
+                const payload: Record<string, unknown> = { provider: source.provider };
+                if (source.model) payload.model = source.model;
+                return fetch(`/api/agents/${a.id}/model`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+            })
+        );
+        addLog(sourceAgentId, `⚡ Applied ${source.provider}${source.model ? ` / ${source.model}` : ''} to all agents`);
     };
 
     const handleProjectCreated = (project: Project) => {
@@ -390,20 +543,27 @@ export default function DashboardPage() {
                     {activeTab === 'team' && (
                         <motion.div key="team" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
                             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                                {agents.map(agent => (
-                                    <AgentCard
-                                        key={agent.id}
-                                        agent={agent}
-                                        activeStack={activeProject?.stack}
-                                        agentMemories={memories[agent.role] ?? []}
-                                        onModelSwitch={provider => handleModelSwitch(agent.id, provider)}
-                                        onForgetMemories={async () => {
-                                            await fetch(`/api/memories/clear?agentRole=${agent.role}`, { method: 'DELETE' });
-                                            setMemories(prev => ({ ...prev, [agent.role]: [] }));
-                                            addLog(agent.role, `🧹 Memories cleared for ${agent.name}`);
-                                        }}
-                                    />
-                                ))}
+                                {isLoadingAgents
+                                    ? Array.from({ length: 6 }).map((_, i) => <SkeletonCard key={i} />)
+                                    : agents.map(agent => (
+                                        <AgentCard
+                                            key={agent.id}
+                                            agent={agent}
+                                            activeStack={activeProject?.stack}
+                                            agentMemories={memories[agent.role] ?? []}
+                                            agentSkills={agentSkills[agent.role] ?? []}
+                                            onModelSwitch={(provider: ModelProvider, model: string | null, apiKey?: string) =>
+                                                handleModelSwitch(agent.id, provider, model, apiKey)
+                                            }
+                                            onForgetMemories={() => {
+                                                fetch(`/api/memories/clear?agentRole=${agent.role}`, { method: 'DELETE' })
+                                                    .then(() => setMemories(prev => ({ ...prev, [agent.role]: [] })));
+                                                addLog(agent.role, `🧹 Memories cleared for ${agent.name}`);
+                                            }}
+                                            onApplyToAll={() => handleApplyToAll(agent.id)}
+                                        />
+                                    ))
+                                }
                             </div>
                         </motion.div>
                     )}
@@ -411,12 +571,14 @@ export default function DashboardPage() {
                     {activeTab === 'tasks' && (
                         <motion.div key="tasks" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
                             className="space-y-3">
-                            {tasks.length === 0
-                                ? <EmptyState icon="📋" text="No tasks yet. Submit a task above." />
-                                : tasks.map(task => {
-                                    const proj = projects.find(p => p.id === task.projectId);
-                                    return <TaskCard key={task.id} task={task} projectName={proj?.name} />;
-                                })
+                            {isLoadingTasks
+                                ? Array.from({ length: 3 }).map((_, i) => <SkeletonRow key={i} />)
+                                : tasks.length === 0
+                                    ? <EmptyState icon="📋" text="No tasks yet. Submit a task above." />
+                                    : tasks.map(task => {
+                                        const proj = projects.find(p => p.id === task.projectId);
+                                        return <TaskCard key={task.id} task={task} projectName={proj?.name} />;
+                                    })
                             }
                         </motion.div>
                     )}
@@ -604,19 +766,29 @@ export default function DashboardPage() {
     );
 }
 
-// ── Agent Card ──────────────────────────────────────────────────────────────
+// \u2500\u2500 Agent Card \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+
 function AgentCard({
-    agent, activeStack, agentMemories, onModelSwitch, onForgetMemories
+    agent, activeStack, agentMemories, agentSkills, onModelSwitch, onForgetMemories, onApplyToAll
 }: {
     agent: AgentInfo;
     activeStack?: StackConfig;
     agentMemories: AgentMemory[];
-    onModelSwitch: (p: ModelProvider) => void;
-    onForgetMemories: () => Promise<void>;
+    agentSkills: AgentSkill[];
+    onModelSwitch: (p: ModelProvider, model: string | null, apiKey?: string) => Promise<void>;
+    onForgetMemories: () => void;
+    onApplyToAll: () => void;
 }) {
     const c = ROLE_COLORS[agent.role];
     const [memExpanded, setMemExpanded] = useState(false);
+    const [skillsExpanded, setSkillsExpanded] = useState(false);
+    const [keyExpanded, setKeyExpanded] = useState(false);
+    const [showKey, setShowKey] = useState(false);
+    const [copied, setCopied] = useState(false);
+    const [keySaved, setKeySaved] = useState(false);
     const [forgetting, setForgetting] = useState(false);
+    const [apiKeyInput, setApiKeyInput] = useState('');
+    const [keySaving, setKeySaving] = useState(false);
 
     // Determine which stack key is relevant for this agent
     const stackHints: Partial<Record<AgentRole, StackCategory[]>> = {
@@ -630,6 +802,42 @@ function AgentCard({
     const stackBadges = activeStack
         ? relevantCats.map(cat => activeStack[cat]).filter(Boolean) as string[]
         : [];
+
+    // Model variant options for the current provider
+    const modelOptions: ModelOption[] = MODEL_CATALOG[agent.provider as keyof typeof MODEL_CATALOG] ?? [];
+    const currentModel = agent.model ?? (modelOptions[0]?.value ?? null);
+
+    const handleProviderChange = (provider: ModelProvider) => {
+        const defaultModel = MODEL_CATALOG[provider]?.[0]?.value ?? null;
+        onModelSwitch(provider, defaultModel);
+    };
+
+    const handleModelChange = (model: string) => {
+        onModelSwitch(agent.provider, model);
+    };
+
+    const handleSaveKey = async () => {
+        if (!apiKeyInput.trim()) return;
+        setKeySaving(true);
+        try {
+            // Await the full PATCH so we know it reached the server
+            await onModelSwitch(agent.provider, currentModel, apiKeyInput.trim());
+            setApiKeyInput('');
+            setKeyExpanded(false);
+            setShowKey(false);
+            setKeySaved(true);
+            setTimeout(() => setKeySaved(false), 2000);
+        } finally {
+            setKeySaving(false);
+        }
+    };
+
+    const handleCopy = async () => {
+        if (!apiKeyInput) return;
+        await navigator.clipboard.writeText(apiKeyInput);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+    };
 
     return (
         <motion.div initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }}
@@ -660,50 +868,183 @@ function AgentCard({
                 ))}
             </div>
 
-            {/* Stack badges (from active project) */}
+            {/* Stack badges */}
             {stackBadges.length > 0 && (
                 <div className="flex gap-1.5 flex-wrap">
                     {stackBadges.map(b => (
-                        <span key={b} className={`text-xs ${c.bg} ${c.text} px-2 py-0.5 rounded-full border ${c.border}`}>
-                            {b}
-                        </span>
+                        <span key={b} className={`text-xs ${c.bg} ${c.text} px-2 py-0.5 rounded-full border ${c.border}`}>{b}</span>
                     ))}
                 </div>
             )}
 
-            {/* Model Switcher */}
-            <div>
-                <label className="text-xs text-gray-500 block mb-1.5">LLM Provider</label>
+            {/* \u2500\u2500 LLM Config \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 */}
+            <div className="space-y-2 border-t border-gray-800 pt-3">
+                <div className="flex items-center justify-between">
+                    <label className="text-xs text-gray-500">LLM Provider</label>
+                    {agent.hasApiKey && (
+                        <span className="text-xs px-1.5 py-0.5 rounded-full bg-green-900/40 text-green-400">🔑 Key saved</span>
+                    )}
+                </div>
+
+                {/* Provider selector */}
                 <select
                     id={`model-select-${agent.id}`}
                     value={agent.provider}
-                    onChange={e => onModelSwitch(e.target.value as ModelProvider)}
-                    className="w-full bg-gray-800 border border-gray-700 text-sm text-white rounded-lg px-3 py-1.5 focus:outline-none"
+                    onChange={e => handleProviderChange(e.target.value as ModelProvider)}
+                    className="w-full bg-gray-800 border border-gray-700 text-sm text-white rounded-lg px-3 py-1.5 focus:outline-none focus:border-cyan-500/40"
                 >
                     {MODEL_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </select>
+
+                {/* Model variant selector */}
+                {modelOptions.length > 0 && (
+                    <select
+                        id={`variant-select-${agent.id}`}
+                        value={currentModel ?? ''}
+                        onChange={e => handleModelChange(e.target.value)}
+                        className="w-full bg-gray-800 border border-gray-700/60 text-xs text-gray-300 rounded-lg px-3 py-1.5 focus:outline-none focus:border-cyan-500/40"
+                    >
+                        {modelOptions.map(o => (
+                            <option key={o.value} value={o.value}>
+                                {o.label}{o.free ? ' ✦' : ''}
+                            </option>
+                        ))}
+                    </select>
+                )}
+
+                {/* API Key section */}
+                <button
+                    onClick={() => setKeyExpanded(p => !p)}
+                    className="flex items-center gap-1.5 text-xs text-gray-600 hover:text-gray-400 transition-colors w-full"
+                >
+                    <span>{keyExpanded ? '▲' : '▼'}</span>
+                    <span>{agent.hasApiKey ? 'Replace API key' : 'Set API key (optional)'}</span>
+                    <span className="ml-auto text-gray-700 text-xs">overrides .env</span>
+                </button>
+
+                {keyExpanded && (
+                    <div className="space-y-1.5">
+                        <div className="flex gap-1.5">
+                            {/* Key input with show/hide */}
+                            <input
+                                type={showKey ? 'text' : 'password'}
+                                placeholder={`${agent.provider} API key`}
+                                value={apiKeyInput}
+                                onChange={e => setApiKeyInput(e.target.value)}
+                                onKeyDown={e => e.key === 'Enter' && handleSaveKey()}
+                                className="flex-1 bg-gray-800/80 border border-gray-700 text-xs text-white rounded-lg px-3 py-1.5 focus:outline-none focus:border-cyan-500/40 font-mono min-w-0"
+                            />
+                            {/* Show/hide toggle */}
+                            <button
+                                type="button"
+                                onClick={() => setShowKey(p => !p)}
+                                title={showKey ? 'Hide key' : 'Show key'}
+                                className="bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-400 hover:text-white text-xs px-2.5 rounded-lg transition-colors"
+                            >
+                                {showKey ? '🙈' : '👁️'}
+                            </button>
+                            {/* Copy button */}
+                            <button
+                                type="button"
+                                onClick={handleCopy}
+                                disabled={!apiKeyInput.trim()}
+                                title="Copy to clipboard"
+                                className="bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-400 hover:text-white text-xs px-2.5 rounded-lg transition-colors disabled:opacity-30"
+                            >
+                                {copied ? '✓' : '📋'}
+                            </button>
+                            {/* Save */}
+                            <button
+                                onClick={handleSaveKey}
+                                disabled={keySaving || !apiKeyInput.trim()}
+                                className="bg-cyan-700 hover:bg-cyan-600 disabled:opacity-40 text-white text-xs px-3 rounded-lg transition-colors"
+                            >
+                                {keySaving ? '⟳' : 'Save'}
+                            </button>
+                        </div>
+                    </div>
+                )}
+
+                {/* ✅ Key saved confirmation flash */}
+                {keySaved && (
+                    <motion.div
+                        initial={{ opacity: 0, y: -4 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="flex items-center gap-2 text-xs text-green-400 bg-green-900/20 border border-green-800/40 rounded-lg px-3 py-1.5"
+                    >
+                        <span>✓</span><span>API key saved to database</span>
+                    </motion.div>
+                )}
+
+                {/* Apply to all */}
+                <button
+                    onClick={onApplyToAll}
+                    className="flex items-center gap-1.5 text-xs text-cyan-700 hover:text-cyan-500 transition-colors w-full mt-1"
+                    title={`Copy ${agent.provider} / ${currentModel ?? ''} settings to all other agents`}
+                >
+                    <span>⚡</span>
+                    <span>Apply to all agents</span>
+                    <span className="ml-auto text-gray-700 font-mono">{agent.provider}{currentModel ? ` · ${currentModel.split('-').slice(-2).join('-')}` : ''}</span>
+                </button>
             </div>
 
-            {/* 🧠 Memory Panel */}
+            {/* \u2500\u2500 Memory Panel \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 */}
+            {/* ── Skills Panel ──────────────────────────────────────────── */}
+            <div className="border-t border-gray-800 pt-3">
+                <button
+                    onClick={() => setSkillsExpanded(p => !p)}
+                    className="flex items-center justify-between w-full text-xs text-gray-500 hover:text-gray-300 transition-colors"
+                >
+                    <span>📚 Skills <span className={`ml-1 px-1.5 py-0.5 rounded-full text-xs font-mono ${agentSkills.length > 0 ? `${c.bg} ${c.text}` : 'bg-gray-800 text-gray-600'}`}>{agentSkills.length}</span></span>
+                    <span>{skillsExpanded ? '▲' : '▼'}</span>
+                </button>
+                {skillsExpanded && (
+                    <div className="mt-2 space-y-1.5">
+                        {agentSkills.length === 0 ? (
+                            <p className="text-xs text-gray-600 italic">No skills — add them in the Skills tab.</p>
+                        ) : (
+                            agentSkills.map(s => (
+                                <div key={s.id} className="bg-gray-800/60 rounded-lg px-2.5 py-1.5 flex items-start gap-2">
+                                    <span className={`flex-shrink-0 text-xs font-mono px-1.5 py-0.5 rounded-full mt-0.5 ${s.priority >= 70 ? 'bg-red-900/50 text-red-400'
+                                        : s.priority >= 40 ? 'bg-yellow-900/50 text-yellow-400'
+                                            : 'bg-gray-700 text-gray-500'
+                                        }`}>{s.priority}</span>
+                                    <div className="flex-1 min-w-0">
+                                        <p className="text-xs font-medium text-gray-300 truncate">{s.name}</p>
+                                        {s.description && <p className="text-xs text-gray-600 truncate">{s.description}</p>}
+                                    </div>
+                                    {s.sourceUrl && (
+                                        <a href={s.sourceUrl} target="_blank" rel="noopener noreferrer"
+                                            className="flex-shrink-0 text-gray-700 hover:text-cyan-500 text-xs transition-colors"
+                                            title={s.sourceUrl}>🔗</a>
+                                    )}
+                                </div>
+                            ))
+                        )}
+                    </div>
+                )}
+            </div>
+
+            {/* ── Memory Panel ───────────────────────────────────────────── */}
             <div className="border-t border-gray-800 pt-3">
                 <button
                     onClick={() => setMemExpanded(p => !p)}
                     className="flex items-center justify-between w-full text-xs text-gray-500 hover:text-gray-300 transition-colors"
                 >
-                    <span>🧠 Memory <span className={`ml-1 px-1.5 py-0.5 rounded-full text-xs font-mono ${agentMemories.length > 0 ? `${c.bg} ${c.text}` : 'bg-gray-800 text-gray-600'
-                        }`}>{agentMemories.length}</span></span>
+                    <span>🧠 Memory <span className={`ml-1 px-1.5 py-0.5 rounded-full text-xs font-mono ${agentMemories.length > 0 ? `${c.bg} ${c.text}` : 'bg-gray-800 text-gray-600'}`}>{agentMemories.length}</span></span>
                     <span>{memExpanded ? '▲' : '▼'}</span>
                 </button>
 
                 {memExpanded && (
                     <div className="mt-2 space-y-2">
                         {agentMemories.length === 0 ? (
-                            <p className="text-xs text-gray-600 italic">No memories yet — memories are saved after each completed task.</p>
+                            <p className="text-xs text-gray-600 italic">No memories yet — saved after each completed task.</p>
                         ) : (
                             agentMemories.slice(0, 3).map(m => (
                                 <div key={m.id} className="bg-gray-800/60 rounded-lg p-2 text-xs text-gray-400">
-                                    <span className={`text-xs px-1.5 py-0.5 rounded-full mr-1.5 ${m.memoryType === 'LESSON' ? 'bg-yellow-900/60 text-yellow-400' : 'bg-gray-700 text-gray-500'
-                                        }`}>{m.memoryType === 'LESSON' ? '⭐ Lesson' : '🕐'}</span>
+                                    <span className={`text-xs px-1.5 py-0.5 rounded-full mr-1.5 ${m.memoryType === 'LESSON' ? 'bg-yellow-900/60 text-yellow-400' : 'bg-gray-700 text-gray-500'}`}>
+                                        {m.memoryType === 'LESSON' ? '⭐ Lesson' : '🕐'}
+                                    </span>
                                     {m.content.slice(0, 90)}{m.content.length > 90 ? '…' : ''}
                                 </div>
                             ))
@@ -859,14 +1200,31 @@ function ProjectWizard({ onClose, onCreated }: {
 // ── Task Card ────────────────────────────────────────────────────────────────
 function TaskCard({ task, projectName }: { task: Task; projectName?: string }) {
     const badge = TASK_BADGE[task.status];
+    const isLive = task.status === 'PENDING' || task.status === 'THINKING' || task.status === 'EXECUTING';
+    // Auto-expand results when task completes
     const [expanded, setExpanded] = useState(false);
+    const prevStatus = useRef(task.status);
+    useEffect(() => {
+        if (prevStatus.current !== task.status && task.status === 'SUCCESS' && task.results.length > 0) {
+            setExpanded(true);
+        }
+        prevStatus.current = task.status;
+    }, [task.status, task.results.length]);
 
     return (
-        <div className="bg-gray-900/60 border border-gray-800 rounded-xl p-4 space-y-2">
+        <div className={`bg-gray-900/60 border rounded-xl p-4 space-y-2 transition-all ${isLive ? 'border-cyan-500/30' : task.status === 'SUCCESS' ? 'border-green-500/20' : task.status === 'FAILED' ? 'border-red-500/20' : 'border-gray-800'
+            }`}>
             <div className="flex items-start justify-between gap-3">
                 <p className="text-sm text-white flex-1 leading-relaxed">{task.userRequest}</p>
                 <span className={`text-xs px-2 py-0.5 rounded-full shrink-0 ${badge.cls}`}>{badge.label}</span>
             </div>
+            {/* Live spinner while agent is working */}
+            {isLive && (
+                <div className="flex items-center gap-2 text-xs text-cyan-500">
+                    <span className="inline-block w-3 h-3 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
+                    Agent is working… results will appear automatically
+                </div>
+            )}
             <div className="flex items-center gap-3 text-xs text-gray-500">
                 {projectName && <span className="text-cyan-600">📦 {projectName}</span>}
                 {task.assignedRole && <span>→ <span className="text-gray-400">{task.assignedRole}</span></span>}
@@ -875,13 +1233,15 @@ function TaskCard({ task, projectName }: { task: Task; projectName?: string }) {
             {task.results.length > 0 && (
                 <div>
                     <button onClick={() => setExpanded(!expanded)} className="text-xs text-gray-600 hover:text-gray-400 transition-colors">
-                        {expanded ? '▲ Hide' : `▼ ${task.results.length} result(s)`}
+                        {expanded ? '▲ Hide results' : `▼ Show ${task.results.length} result(s)`}
                     </button>
                     <AnimatePresence>
                         {expanded && (
                             <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}
-                                className="mt-2 bg-gray-800/50 rounded-lg p-3 font-mono text-xs text-gray-300 space-y-1 overflow-hidden max-h-40 overflow-y-auto">
-                                {task.results.map((r, i) => <div key={i}>{r}</div>)}
+                                className="mt-2 bg-gray-800/50 rounded-lg p-3 font-mono text-xs text-gray-300 space-y-2 overflow-hidden max-h-64 overflow-y-auto">
+                                {task.results.map((r, i) => (
+                                    <div key={i} className="border-b border-gray-700/50 pb-2 last:border-0 last:pb-0 whitespace-pre-wrap">{r}</div>
+                                ))}
                             </motion.div>
                         )}
                     </AnimatePresence>

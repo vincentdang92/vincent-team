@@ -35,10 +35,47 @@ export interface ModelConfig {
 // ── Default models per provider ───────────────────────────────────────────────
 const DEFAULT_MODELS: Record<ModelProvider, string> = {
     [ModelProvider.CLAUDE]: 'claude-3-5-sonnet-20241022',
-    [ModelProvider.GEMINI]: 'gemini-1.5-pro',
+    [ModelProvider.GEMINI]: 'gemini-2.0-flash',
     [ModelProvider.DEEPSEEK]: 'deepseek-chat',
     [ModelProvider.GPT4O]: 'gpt-4o',
     [ModelProvider.OLLAMA]: 'llama3',
+};
+
+// ── Model catalogs (used by UI for per-provider selectors) ────────────────────
+export interface ModelOption {
+    value: string;
+    label: string;
+    free?: boolean;   // available on free tier
+}
+
+export const MODEL_CATALOG: Record<ModelProvider, ModelOption[]> = {
+    [ModelProvider.GEMINI]: [
+        { value: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash', free: true },
+        { value: 'gemini-2.0-flash-lite', label: 'Gemini 2.0 Flash Lite', free: true },
+        { value: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash', free: true },
+        { value: 'gemini-1.5-flash-8b', label: 'Gemini 1.5 Flash 8B', free: true },
+        { value: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro', free: false },
+    ],
+    [ModelProvider.CLAUDE]: [
+        { value: 'claude-3-5-sonnet-20241022', label: 'Claude 3.5 Sonnet' },
+        { value: 'claude-3-5-haiku-20241022', label: 'Claude 3.5 Haiku' },
+        { value: 'claude-3-opus-20240229', label: 'Claude 3 Opus' },
+    ],
+    [ModelProvider.DEEPSEEK]: [
+        { value: 'deepseek-chat', label: 'DeepSeek Chat (V3)' },
+        { value: 'deepseek-reasoner', label: 'DeepSeek Reasoner (R1)' },
+    ],
+    [ModelProvider.GPT4O]: [
+        { value: 'gpt-4o', label: 'GPT-4o' },
+        { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
+        { value: 'o1-mini', label: 'o1 Mini' },
+    ],
+    [ModelProvider.OLLAMA]: [
+        { value: 'llama3', label: 'Llama 3' },
+        { value: 'llama3.1', label: 'Llama 3.1' },
+        { value: 'mistral', label: 'Mistral' },
+        { value: 'qwen2.5-coder', label: 'Qwen 2.5 Coder' },
+    ],
 };
 
 // ── Response type ─────────────────────────────────────────────────────────────
