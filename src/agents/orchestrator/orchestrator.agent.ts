@@ -16,14 +16,39 @@ import { getProjectConfig } from '@/lib/project-config';
 // ── Role classification keywords ──────────────────────────────────────────────
 const ROLE_KEYWORDS: Record<string, string[]> = {
     devops: ['deploy', 'server', 'vps', 'ssh', 'docker', 'nginx', 'systemd', 'disk', 'cpu',
-        'memory', 'infra', 'ci/cd', 'pipeline', 'scale', 'container', 'kubernetes'],
+        'memory', 'infra', 'ci/cd', 'pipeline', 'scale', 'container', 'kubernetes',
+        'hosting', 'host', 'cloud server', 'droplet', 'ec2', 'linode', 'digitalocean'],
     backend: ['api', 'route', 'database', 'schema', 'endpoint', 'auth', 'backend',
-        'server-side', 'migration', 'query', 'model', 'crud', 'rest', 'graphql'],
+        'server-side', 'migration', 'query', 'model', 'crud', 'rest', 'graphql',
+        'webhook', 'middleware', 'prisma', 'supabase'],
     qa: ['test', 'bug', 'quality', 'coverage', 'playwright', 'vitest', 'jest', 'pytest',
         'spec', 'assertion', 'review code', 'security audit', 'lint', 'e2e'],
-    ux: ['ui', 'component', 'design', 'css', 'tailwind', 'animation', 'accessibility',
-        'a11y', 'layout', 'frontend', 'ux', 'form', 'button', 'page', 'view', 'screen'],
+    ux: [
+        // general UI
+        'ui', 'component', 'design', 'css', 'tailwind', 'animation', 'accessibility',
+        'a11y', 'layout', 'frontend', 'ux', 'form', 'button', 'page', 'view', 'screen',
+        // landing page specific
+        'landing', 'landing page', 'homepage', 'home page', 'hero', 'section', 'sections',
+        'banner', 'header', 'footer', 'navbar', 'nav', 'cta', 'feature', 'pricing',
+        // static site
+        'html', 'html page', 'static', 'static page', 'static site',
+        // frameworks
+        'bootstrap', 'react', 'next.js', 'nextjs', 'vue', 'svelte', 'angular',
+        // content
+        'responsive', 'mobile-friendly', 'card', 'grid', 'flex', 'template',
+        // sale / marketing pages
+        'sale', 'product page', 'promo', 'marketing page', 'showcase',
+    ],
 };
+
+// ── Stack → role affinity (used to break ties) ─────────────────────────────────
+const STACK_ROLE_BOOST: Array<{ stackFields: string[]; role: string; boost: number }> = [
+    { stackFields: ['frontend'], role: 'ux', boost: 3 },
+    { stackFields: ['mobile'], role: 'ux', boost: 2 },
+    { stackFields: ['backend', 'database'], role: 'backend', boost: 2 },
+    { stackFields: ['deploy', 'database'], role: 'devops', boost: 2 },
+    { stackFields: ['testing'], role: 'qa', boost: 2 },
+];
 
 // ── Extended context for stack-aware dispatch ─────────────────────────────────
 export interface OrchestratorContext extends TaskContext {
@@ -51,13 +76,29 @@ Always route to the most specific role. When in doubt, prefer backend.`);
     }
 
     /** Classify which agent role should handle a task */
-    classifyTask(userRequest: string): string {
+    classifyTask(userRequest: string, stack?: StackConfig): string {
         const lower = userRequest.toLowerCase();
         const scores: Record<string, number> = { devops: 0, backend: 0, qa: 0, ux: 0 };
 
         for (const [role, keywords] of Object.entries(ROLE_KEYWORDS)) {
             for (const kw of keywords) {
-                if (lower.includes(kw)) scores[role]++;
+                if (lower.includes(kw)) {
+                    // Multi-word matches count more
+                    scores[role] += kw.includes(' ') ? 2 : 1;
+                }
+            }
+        }
+
+        // Stack-aware boost: if project is frontend-only, prefer ux; etc.
+        if (stack) {
+            for (const { stackFields, role, boost } of STACK_ROLE_BOOST) {
+                const hasField = stackFields.every(f => !!(stack as Record<string, unknown>)[f]);
+                // Boost role only if AT LEAST ONE of the OTHER heavy roles is absent
+                const otherHeavy = stackFields.some(f =>
+                    (f === 'backend' && !stack.backend) ||
+                    (f === 'database' && !stack.database)
+                );
+                if (hasField || otherHeavy) scores[role] += boost;
             }
         }
 
@@ -98,8 +139,8 @@ Always route to the most specific role. When in doubt, prefer backend.`);
             }
         }
 
-        // Classify + build stack-aware agent
-        const role = this.classifyTask(context.userRequest);
+        // Classify + build stack-aware agent (pass stack so classifier can boost)
+        const role = this.classifyTask(context.userRequest, stack);
         const agent = this.buildRoleAgent(role, stack);
 
         await this.log('INFO' as never, `🎯 Routing to [${role.toUpperCase()}] agent`);

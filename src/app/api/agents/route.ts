@@ -49,21 +49,41 @@ export async function GET() {
         // Mask the apiKey before sending to client
         const sanitized = agents.map(a => {
             const cfg = (a.config as Record<string, unknown> | null) ?? {};
-            const rawKey = cfg.apiKey as string | undefined;
+            const provider = (cfg.provider as string) ?? null;
+
+            // Per-provider key map (new format)
+            const apiKeys = (cfg.apiKeys as Record<string, string> | undefined) ?? {};
+            // Legacy single key fallback (old rows)
+            const legacyKey = (cfg.apiKey as string | undefined);
+
+            // Resolve key for the currently-configured provider
+            const rawKey: string | undefined =
+                (provider && apiKeys[provider]) ? apiKeys[provider]
+                    : (legacyKey && (!provider || cfg.provider === provider)) ? legacyKey
+                        : undefined;
+
             const keyHint = rawKey && rawKey.length >= 8
                 ? `${rawKey.slice(0, 4)}••••••••${rawKey.slice(-4)}`
                 : rawKey ? '••••••••' : null;
+
+            // Build a summary of which providers have keys (safe — no raw values)
+            const savedProviders = Object.keys(apiKeys).filter(k => !!apiKeys[k]);
+            if (legacyKey && provider && !savedProviders.includes(provider)) {
+                savedProviders.push(provider);   // include legacy in the list
+            }
+
             return {
                 id: a.id,
                 name: a.name,
                 type: a.type,
                 status: a.status,
                 config: {
-                    provider: cfg.provider ?? null,
+                    provider: provider ?? null,
                     model: cfg.model ?? null,
                     temperature: cfg.temperature ?? null,
-                    hasApiKey: !!rawKey,  // boolean only — never expose the raw key
-                    keyHint,             // safe partial preview e.g. "sk-a••••••••b3f2"
+                    hasApiKey: !!rawKey,
+                    keyHint,
+                    savedProviders,   // e.g. ["GEMINI", "CLAUDE"] — lets UI show ✓ per provider
                 },
             };
         });

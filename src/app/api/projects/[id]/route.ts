@@ -19,6 +19,7 @@ const updateSchema = z.object({
         database: z.string().optional(),
         testing: z.string().optional(),
         deploy: z.string().optional(),
+        mobile: z.string().optional(),   // ← was missing — caused mobile to be stripped by Zod
     }).optional(),
 });
 

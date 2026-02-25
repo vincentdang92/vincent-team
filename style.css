@@ -1,0 +1,184 @@
+/* Custom CSS for CloudServe Landing Page */
+
+/* Design System Integration - Example Colors & Typography */
+/* These would be derived from the ui-ux-pro-max output */
+:root {
+    --bs-primary: #007bff; /* Example primary color */
+    --bs-secondary: #6c757d; /* Example secondary color */
+    --bs-info: #17a2b8; /* Example info color */
+    --bs-dark: #343a40; /* Example dark color */
+    --bs-light: #f8f9fa; /* Example light color */
+    --bs-body-font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; /* Example body font */
+    --bs-heading-font-family: 'Impact', Haettenschweiler, 'Arial Narrow Bold', sans-serif; /* Example heading font */
+}
+
+body {
+    font-family: var(--bs-body-font-family);
+    line-height: 1.6;
+    scroll-behavior: smooth; /* Smooth scrolling for anchor links */
+}
+
+h1, h2, h3, h4, h5, h6 {
+    font-family: var(--bs-heading-font-family);
+    font-weight: 700;
+}
+
+/* Hero Section Styling */
+.hero-section {
+    background: linear-gradient(rgba(0, 0, 0, 0.6), rgba(0, 0, 0, 0.6)), url('https://via.placeholder.com/1920x1080/343a40/ffffff?text=Hero+Background') no-repeat center center/cover;
+    color: #ffffff;
+    padding-top: 150px; /* Adjust to avoid overlap with fixed navbar */
+    padding-bottom: 100px;
+}
+
+.hero-section h1 {
+    font-size: 4.5rem; /* Larger font size for hero */
+    margin-bottom: 20px;
+}
+
+.hero-section p {
+    font-size: 1.25rem;
+    margin-bottom: 30px;
+}
+
+/* Carousel Styling */
+.carousel-caption {
+    background-color: rgba(0, 0, 0, 0.5);
+    padding: 1.5rem;
+    border-radius: 0.5rem;
+}
+
+.carousel-item img {
+    max-height: 450px;
+    object-fit: cover;
+    width: 100%;
+}
+
+/* Card Styling */
+.card {
+    transition: transform 0.3s ease-in-out, box-shadow 0.3s ease-in-out;
+    border: none;
+}
+
+.card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 10px 20px rgba(0,0,0,0.12), 0 6px 6px rgba(0,0,0,0.06);
+}
+
+.card-body {
+    padding: 2rem;
+}
+
+.card-body i {
+    font-size: 3rem; /* Larger icons in cards */
+    margin-bottom: 1.5rem;
+}
+
+.card-title {
+    font-size: 1.75rem;
+    margin-bottom: 1rem;
+}
+
+.card-text {
+    font-size: 1rem;
+    color: #6c757d; /* Muted text for card descriptions */
+}
+
+.card ul li {
+    margin-bottom: 0.75rem;
+}
+
+.card ul li i {
+    font-size: 1rem;
+    margin-right: 0.5rem;
+}
+
+/* Form Styling */
+.form-label {
+    font-weight: 500;
+}
+
+.form-control {
+    padding: 0.75rem 1rem;
+    border-radius: 0.5rem;
+}
+
+.btn-primary, .btn-secondary, .btn-info {
+    transition: background-color 0.3s ease, border-color 0.3s ease, transform 0.2s ease;
+}
+
+.btn-primary:hover, .btn-secondary:hover, .btn-info:hover {
+    transform: translateY(-2px);
+}
+
+/* Footer Styling */
+footer {
+    background-color: var(--bs-dark);
+    color: #ffffff;
+}
+
+footer h5 {
+    margin-bottom: 1.5rem;
+    color: var(--bs-light);
+}
+
+footer a {
+    color: #adb5bd;
+    text-decoration: none;
+}
+
+footer a:hover {
+    color: #ffffff;
+}
+
+footer i {
+    vertical-align: middle;
+}
+
+/* Accessibility Enhancements */
+/* Ensure focus states are visible */
+.btn:focus, .form-control:focus, .form-select:focus {
+    box-shadow: 0 0 0 0.25rem rgba(0, 123, 255, 0.25);
+}
+
+/* For icon-only buttons (like carousel controls), ensure accessible names */
+.carousel-control-prev, .carousel-control-next {
+    /* Ensure these are visually distinct and interactive */
+}
+
+/* Media Queries for finer control */
+@media (max-width: 992px) {
+    .hero-section h1 {
+        font-size: 3.5rem;
+    }
+}
+
+@media (max-width: 768px) {
+    .hero-section {
+        padding-top: 100px; /* Adjust for smaller screens */
+    }
+    .hero-section h1 {
+        font-size: 3rem;
+    }
+    .card-body i {
+        font-size: 2.5rem;
+    }
+}
+
+@media (max-width: 576px) {
+    .hero-section {
+        padding-top: 80px;
+    }
+    .hero-section h1 {
+        font-size: 2.5rem;
+    }
+    .hero-section p {
+        font-size: 1.1rem;
+    }
+    .carousel-caption {
+        padding: 1rem;
+    }
+    .card {
+        margin-bottom: 1.5rem;
+    }
+}

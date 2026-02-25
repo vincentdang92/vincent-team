@@ -5,6 +5,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
+import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 
 type Params = { params: Promise<{ id: string }> };
@@ -17,6 +18,8 @@ const updateSchema = z.object({
     isActive: z.boolean().optional(),
     priority: z.number().int().min(0).max(100).optional(),
     sourceUrl: z.string().url().optional(),
+    // Stack-aware triggers: { frontend?: 'bootstrap', deploy?: 'netlify', ... } or null to clear
+    stackTriggers: z.record(z.string(), z.string()).optional().nullable(),
 });
 
 export async function PATCH(req: NextRequest, { params }: Params) {
@@ -32,9 +35,16 @@ export async function PATCH(req: NextRequest, { params }: Params) {
             );
         }
 
+        const { stackTriggers, ...rest } = parsed.data;
         const skill = await prisma.agentSkill.update({
             where: { id },
-            data: parsed.data,
+            data: {
+                ...rest,
+                // Prisma requires Prisma.JsonNull (not JS null) for nullable JSON fields
+                ...(stackTriggers !== undefined
+                    ? { stackTriggers: stackTriggers === null ? Prisma.JsonNull : stackTriggers }
+                    : {}),
+            },
         });
 
         return NextResponse.json({ skill });

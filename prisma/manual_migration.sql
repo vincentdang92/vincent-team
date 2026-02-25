@@ -206,21 +206,25 @@ CREATE INDEX IF NOT EXISTS "SubTask_agentRole_idx" ON "SubTask"("agentRole");
 -- 10. AgentSkill
 -- ============================================================
 CREATE TABLE IF NOT EXISTS "AgentSkill" (
-    "id"           TEXT NOT NULL,
-    "name"         TEXT NOT NULL,
-    "description"  TEXT,
-    "agentRole"    TEXT NOT NULL DEFAULT 'all',
-    "content"      TEXT NOT NULL,
-    "sourceUrl"    TEXT,
-    "sourceAuthor" TEXT,
-    "isActive"     BOOLEAN NOT NULL DEFAULT true,
-    "priority"     INTEGER NOT NULL DEFAULT 0,
-    "createdAt"    TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt"    TIMESTAMP(3) NOT NULL,
+    "id"            TEXT NOT NULL,
+    "name"          TEXT NOT NULL,
+    "description"   TEXT,
+    "agentRole"     TEXT NOT NULL DEFAULT 'all',
+    "content"       TEXT NOT NULL,
+    "sourceUrl"     TEXT,
+    "sourceAuthor"  TEXT,
+    -- Stack-aware auto-activation: { "frontend": "Bootstrap", "deploy": "Vercel", ... }
+    -- null / {} = global skill that always activates (OR logic on any key match)
+    "stackTriggers" JSONB,
+    "isActive"      BOOLEAN NOT NULL DEFAULT true,
+    "priority"      INTEGER NOT NULL DEFAULT 0,
+    "createdAt"     TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt"     TIMESTAMP(3) NOT NULL,
     CONSTRAINT "AgentSkill_pkey" PRIMARY KEY ("id")
 );
 CREATE INDEX IF NOT EXISTS "AgentSkill_agentRole_idx" ON "AgentSkill"("agentRole");
 CREATE INDEX IF NOT EXISTS "AgentSkill_isActive_idx" ON "AgentSkill"("isActive");
+
 
 -- ============================================================
 -- 11. AgentMemory (Phase 5A)
@@ -294,3 +298,12 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 DO $$ BEGIN
     ALTER TABLE "SubTask" ADD CONSTRAINT "SubTask_taskId_fkey" FOREIGN KEY ("taskId") REFERENCES "Task"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- ============================================================
+-- INCREMENTAL MIGRATIONS (safe to re-run on existing databases)
+-- ============================================================
+
+-- Phase 6: Stack-aware skill auto-activation
+-- Adds stackTriggers column to AgentSkill if it doesn't already exist.
+ALTER TABLE "AgentSkill"
+    ADD COLUMN IF NOT EXISTS "stackTriggers" JSONB;

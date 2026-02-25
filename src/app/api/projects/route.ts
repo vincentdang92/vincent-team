@@ -16,6 +16,7 @@ const createProjectSchema = z.object({
         database: z.string().optional(),
         testing: z.string().optional(),
         deploy: z.string().optional(),
+        mobile: z.string().optional(),   // ← keep in sync with StackConfig
     }).optional(),
 });
 

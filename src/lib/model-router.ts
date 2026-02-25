@@ -52,6 +52,7 @@ export const MODEL_CATALOG: Record<ModelProvider, ModelOption[]> = {
     [ModelProvider.GEMINI]: [
         { value: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash', free: true },
         { value: 'gemini-2.0-flash-lite', label: 'Gemini 2.0 Flash Lite', free: true },
+        { value: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite', free: true },
         { value: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash', free: true },
         { value: 'gemini-1.5-flash-8b', label: 'Gemini 1.5 Flash 8B', free: true },
         { value: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro', free: false },
@@ -71,6 +72,7 @@ export const MODEL_CATALOG: Record<ModelProvider, ModelOption[]> = {
         { value: 'o1-mini', label: 'o1 Mini' },
     ],
     [ModelProvider.OLLAMA]: [
+        { value: 'qwen2.5:3b', label: 'Qwen 2.5 3B (Local)' },
         { value: 'llama3', label: 'Llama 3' },
         { value: 'llama3.1', label: 'Llama 3.1' },
         { value: 'mistral', label: 'Mistral' },
@@ -96,7 +98,7 @@ export async function callModel(
 ): Promise<ModelResponse> {
     const model = config.model ?? DEFAULT_MODELS[config.provider];
     const temperature = config.temperature ?? 0.7;
-    const maxTokens = config.maxTokens ?? 4096;
+    const maxTokens = config.maxTokens ?? 8192;
 
     switch (config.provider) {
         case ModelProvider.CLAUDE:
@@ -121,7 +123,7 @@ export async function callModel(
 
         case ModelProvider.OLLAMA:
             return callOpenAICompatible(config, messages, model, temperature, maxTokens, {
-                baseURL: config.baseUrl ?? 'http://localhost:11434/v1',
+                baseURL: config.baseUrl ?? 'https://ollama.version.vn/v1',
                 envKeyName: 'OLLAMA_API_KEY',
                 providerEnum: ModelProvider.OLLAMA,
             });

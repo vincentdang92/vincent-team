@@ -5,6 +5,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
+import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 
 const createSkillSchema = z.object({
@@ -15,6 +16,8 @@ const createSkillSchema = z.object({
     sourceUrl: z.string().url().optional(),
     sourceAuthor: z.string().max(100).optional(),
     priority: z.number().int().min(0).max(100).default(0),
+    // Stack-aware triggers: { frontend?: 'bootstrap', deploy?: 'netlify', ... }
+    stackTriggers: z.record(z.string(), z.string()).optional().nullable(),
 });
 
 export async function GET(req: NextRequest) {
@@ -46,7 +49,14 @@ export async function POST(req: NextRequest) {
             );
         }
 
-        const skill = await prisma.agentSkill.create({ data: parsed.data });
+        const { stackTriggers, ...rest } = parsed.data;
+        const skill = await prisma.agentSkill.create({
+            data: {
+                ...rest,
+                // Prisma requires Prisma.JsonNull (not JS null) for nullable JSON fields
+                stackTriggers: stackTriggers === null ? Prisma.JsonNull : stackTriggers,
+            },
+        });
         return NextResponse.json({ skill }, { status: 201 });
     } catch (err) {
         console.error('[POST /api/skills]', err);

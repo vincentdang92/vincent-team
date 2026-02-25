@@ -74,8 +74,8 @@ export async function buildAgentPrompt(
         }
     }
 
-    // Load custom / SkillsMP skills from DB
-    const customSkills = await loadSkillsForRole(role);
+    // Load custom skills from DB — stack-aware filtering applied inside
+    const customSkills = await loadSkillsForRole(role, stack);
     const skillsBlock = formatSkillsBlock(customSkills);
 
     // Build full prompt

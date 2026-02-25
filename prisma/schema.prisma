@@ -183,6 +183,12 @@ model AgentSkill {
   sourceUrl   String?
   sourceAuthor String?
 
+  // Stack-aware auto-activation: skill only injects when project stack matches.
+  // Stored as { frontend?, backend?, database?, deploy?, testing?, mobile? }
+  // null / {} = always active for any stack (global).
+  // Any matching key activates the skill (OR logic).
+  stackTriggers Json?
+
   // Control
   isActive    Boolean  @default(true)
   priority    Int      @default(0) // higher = injected first in prompt

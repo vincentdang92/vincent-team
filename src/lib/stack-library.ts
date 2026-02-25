@@ -27,6 +27,33 @@ export type StackCategory = keyof StackConfig;
 export const STACK_LIBRARY: Record<StackCategory, Record<string, StackChoice>> = {
     // ── Frontend ─────────────────────────────────────────────────────────────
     frontend: {
+        'HTML': {
+            label: 'Plain HTML Landing Page',
+            description: 'Simple HTML5 + CSS3 + vanilla JS, no framework',
+            promptSnippet: `Frontend: Plain HTML5 / CSS3 / Vanilla JS — simple static landing page.
+- Single-file or multi-file structure: index.html, style.css, main.js
+- Use semantic HTML5 tags: <header>, <nav>, <main>, <section>, <footer>
+- CSS: custom properties (--color-*), Flexbox + Grid layouts, media queries for mobile-first responsive
+- No build tools; pure <link> and <script> tags; CDN for icons (e.g. Font Awesome)
+- Animations: CSS @keyframes or the Web Animations API (no jQuery)
+- Performance: lazy-load images (loading="lazy"), minimize HTTP requests
+- Accessibility: aria-label, role attributes, keyboard-navigable focus styles
+- Deployment: serve as static files — Netlify, GitHub Pages, or any web host`,
+        },
+        'Bootstrap': {
+            label: 'Bootstrap 5 Landing Page',
+            description: 'HTML + Bootstrap 5 components, no build step',
+            promptSnippet: `Frontend: HTML5 + Bootstrap 5 (CDN) landing page.
+- Load via CDN: <link> bootstrap.min.css + <script> bootstrap.bundle.min.js
+- Use Bootstrap grid: container, row, col-* with responsive breakpoints (sm/md/lg/xl)
+- Components: navbar (navbar-expand-lg), hero jumbotron, cards, accordion, modal, carousel
+- Utilities: spacing (m-*, p-*), colors (text-primary, bg-dark), display (d-flex, align-items-center)
+- Custom CSS override file loaded after Bootstrap CDN for brand colors
+- Icons: Bootstrap Icons CDN (<i class="bi bi-*">)
+- Forms: Bootstrap form-control, form-label, btn btn-primary with validation classes
+- JavaScript: use data-bs-* attributes for interactive components (no manual JS needed)
+- Responsive images: img-fluid class; use <picture> with srcset for art direction`,
+        },
         'React+Vite': {
             label: 'React + Vite',
             description: 'React 18, Vite, TanStack Query',

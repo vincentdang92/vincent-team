@@ -26,9 +26,10 @@ interface AgentInfo {
     role: AgentRole;
     status: AgentStatus;
     provider: ModelProvider;
-    model: string | null;       // specific model variant saved in DB
-    hasApiKey: boolean;         // true if a custom API key is saved in DB
-    keyHint: string | null;     // e.g. "sk-a••••••••b3f2" — safe partial preview
+    model: string | null;           // specific model variant saved in DB
+    hasApiKey: boolean;             // true if current provider has a key saved
+    keyHint: string | null;         // masked preview for the current provider's key
+    savedProviders: ModelProvider[]; // which providers have a key stored
     capabilities: string[];
 }
 
@@ -54,6 +55,8 @@ interface AgentSkill {
     isActive: boolean;
     priority: number;
     createdAt: string;
+    // Stack-aware activation: { frontend?: string, backend?: string, ... } | null
+    stackTriggers?: Record<string, string> | null;
 }
 
 interface AgentMemory {
@@ -74,7 +77,7 @@ interface LogEntry {
 }
 
 // ── Config ────────────────────────────────────────────────────────────────────
-const AGENTS: Omit<AgentInfo, 'status' | 'provider' | 'model' | 'hasApiKey' | 'keyHint'>[] = [
+const AGENTS: Omit<AgentInfo, 'status' | 'provider' | 'model' | 'hasApiKey' | 'keyHint' | 'savedProviders'>[] = [
     { id: 'devops', name: 'DevOps Senior', role: 'devops', capabilities: ['SSH', 'Docker', 'Deploy'] },
     { id: 'backend', name: 'Backend Senior', role: 'backend', capabilities: ['API', 'Database', 'Auth'] },
     { id: 'qa', name: 'QA Senior', role: 'qa', capabilities: ['Vitest', 'Playwright', 'Bugs'] },
@@ -167,10 +170,64 @@ function SkeletonRow() {
 
 const STACK_CATEGORIES: StackCategory[] = ['frontend', 'backend', 'database', 'testing', 'deploy', 'mobile'];
 
+// ── Project-type presets ──────────────────────────────────────────────────────
+type ProjectPreset = { label: string; icon: string; hint: string; stack: StackConfig };
+const PROJECT_PRESETS: ProjectPreset[] = [
+    {
+        label: 'Web App',
+        icon: '🌐',
+        hint: 'Full-stack web application with frontend framework, backend API, and database',
+        stack: { frontend: 'React+Vite', backend: 'Express', database: 'PostgreSQL', testing: 'Jest', deploy: 'Docker' },
+    },
+    {
+        label: 'Mobile App',
+        icon: '📱',
+        hint: 'Cross-platform mobile app with a backend API and cloud database',
+        stack: { mobile: 'Flutter', backend: 'FastAPI', database: 'Firebase', testing: 'Jest', deploy: 'Docker' },
+    },
+    {
+        label: 'HTML Landing Page',
+        icon: '🖥️',
+        hint: 'Simple static landing page — no build tools, ready to deploy anywhere',
+        stack: { frontend: 'HTML', backend: undefined, database: undefined, testing: undefined, deploy: 'GitHub Pages' },
+    },
+    {
+        label: 'Bootswatch Page',
+        icon: '🎨',
+        hint: 'Bootstrap 5 styled landing page — fast, responsive, CDN-only',
+        stack: { frontend: 'Bootstrap', backend: undefined, database: undefined, testing: undefined, deploy: 'Netlify' },
+    },
+    {
+        label: 'Next.js SaaS',
+        icon: '⚡',
+        hint: 'Full-stack Next.js app with Prisma/PostgreSQL — ideal for SaaS products',
+        stack: { frontend: 'Next.js', backend: 'Next.js API', database: 'PostgreSQL', testing: 'Jest', deploy: 'Vercel' },
+    },
+];
+
+// ── Companion file reference parser ────────────────────────────────────────────
+// Scans skill content for referenced .md filenames (markdown links, pipe tables,
+// or bare mentions) and returns a deduplicated ordered list.
+function parseCompanionRefs(content: string): string[] {
+    const found = new Set<string>();
+    // Match: [some-name.md](some-name.md) or [**some-name.md**](...)
+    const linkRe = /\[[\*\s]*([^\]\*]+\.md)[\*\s]*\]/gi;
+    // Match: bare word ending in .md that isn't part of a URL
+    const bareRe = /(?<![/#\w])([a-z0-9_-]+\.md)(?![\w/])/gi;
+    let m: RegExpExecArray | null;
+    while ((m = linkRe.exec(content)) !== null) found.add(m[1].trim());
+    while ((m = bareRe.exec(content)) !== null) {
+        const f: string = m[1].trim();
+        // Skip generic self-references like SKILL.md, README.md
+        if (!['skill.md', 'readme.md'].includes(f.toLowerCase())) found.add(f);
+    }
+    return [...found];
+}
+
 // ── Main Dashboard ─────────────────────────────────────────────────────────────
 export default function DashboardPage() {
     const [agents, setAgents] = useState<AgentInfo[]>(
-        AGENTS.map(a => ({ ...a, status: 'IDLE', provider: 'GEMINI', model: 'gemini-2.0-flash', hasApiKey: false, keyHint: null }))
+        AGENTS.map(a => ({ ...a, status: 'IDLE', provider: 'GEMINI', model: 'gemini-2.0-flash', hasApiKey: false, keyHint: null, savedProviders: [] }))
     );
     const [projects, setProjects] = useState<Project[]>([]);
     const [activeProject, setActiveProject] = useState<Project | null>(null);
@@ -179,7 +236,7 @@ export default function DashboardPage() {
     const [skills, setSkills] = useState<AgentSkill[]>([]);
     const [taskInput, setTaskInput] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
-    const [activeTab, setActiveTab] = useState<'team' | 'tasks' | 'logs' | 'skills'>('team');
+    const [activeTab, setActiveTab] = useState<'team' | 'tasks' | 'logs' | 'skills' | 'projects'>('team');
     const [showProjectWizard, setShowProjectWizard] = useState(false);
     // memories: keyed by agentRole
     const [memories, setMemories] = useState<Record<string, AgentMemory[]>>({});
@@ -189,10 +246,30 @@ export default function DashboardPage() {
     // Skill form state
     const [skillForm, setSkillForm] = useState({
         name: '', description: '', agentRole: 'all', content: '', sourceUrl: '', priority: 0,
+        stackTriggers: {} as Record<string, string>,
     });
     const [skillSaving, setSkillSaving] = useState(false);
+    // Companion .md files referenced inside the pasted skill content { filename -> content }
+    const [companionFiles, setCompanionFiles] = useState<Record<string, string>>({});
+    // Skill test modal state
+    const [testingSkill, setTestingSkill] = useState<AgentSkill | null>(null);
+    const [skillTestPrompt, setSkillTestPrompt] = useState('');
+    const [skillTestRole, setSkillTestRole] = useState('ux');
+    const [skillTestLoading, setSkillTestLoading] = useState(false);
+    const [skillTestResult, setSkillTestResult] = useState<{
+        promptPreview: string; promptChars: number; skillChars: number;
+        response: string; model: string;
+    } | null>(null);
+    const [skillTestError, setSkillTestError] = useState<string | null>(null);
+    const [showPromptPreview, setShowPromptPreview] = useState(false);
+    // 'prompt-only' (default, free) | 'llm-call' (costs real tokens)
+    const [skillTestMode, setSkillTestMode] = useState<'prompt-only' | 'llm-call'>('prompt-only');
     const [isLoadingAgents, setIsLoadingAgents] = useState(true);
     const [isLoadingTasks, setIsLoadingTasks] = useState(true);
+    // Project inline-edit state
+    const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
+    const [editingStack, setEditingStack] = useState<StackConfig>({});
+    const [projectActionLoading, setProjectActionLoading] = useState<string | null>(null); // projectId being actioned
     const logsEndRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => { logsEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [logs]);
@@ -251,7 +328,7 @@ export default function DashboardPage() {
         fetch('/api/agents')
             .then(r => r.json())
             .then(d => {
-                const dbAgents: { name: string; config: { provider: string | null; model: string | null; hasApiKey: boolean; keyHint: string | null } }[] = d.agents ?? [];
+                const dbAgents: { name: string; config: { provider: string | null; model: string | null; hasApiKey: boolean; keyHint: string | null; savedProviders?: string[] } }[] = d.agents ?? [];
                 setAgents(prev => prev.map(a => {
                     const saved = dbAgents.find(db => db.name === a.role);
                     if (!saved || !saved.config.provider) return a;
@@ -261,6 +338,7 @@ export default function DashboardPage() {
                         model: saved.config.model,
                         hasApiKey: saved.config.hasApiKey,
                         keyHint: saved.config.keyHint ?? null,
+                        savedProviders: (saved.config.savedProviders ?? []) as ModelProvider[],
                     };
                 }));
             })
@@ -327,16 +405,25 @@ export default function DashboardPage() {
         model?: string | null,
         apiKey?: string
     ) => {
-        setAgents(prev => prev.map(a => a.id === agentId
-            ? {
+        setAgents(prev => prev.map(a => {
+            if (a.id !== agentId) return a;
+            // Optimistically compute per-provider state
+            const newSaved = apiKey
+                ? [...new Set([...a.savedProviders, provider])]
+                : a.savedProviders;
+            const hintForProvider = apiKey
+                ? `${apiKey.slice(0, 4)}\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022${apiKey.slice(-4)}`
+                : a.savedProviders.includes(provider) ? a.keyHint   // keep existing hint if key already saved for this provider
+                    : null;                                          // new provider with no key yet
+            return {
                 ...a,
                 provider,
                 model: model ?? null,
-                hasApiKey: apiKey !== undefined ? !!apiKey : a.hasApiKey,
-                keyHint: apiKey ? `${apiKey.slice(0, 4)}\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022${apiKey.slice(-4)}` : a.keyHint,
-            }
-            : a
-        ));
+                hasApiKey: newSaved.includes(provider),
+                keyHint: hintForProvider,
+                savedProviders: newSaved as ModelProvider[],
+            };
+        }));
         try {
             const payload: Record<string, unknown> = { provider };
             if (model) payload.model = model;
@@ -392,15 +479,24 @@ export default function DashboardPage() {
                     name: skillForm.name.trim(),
                     description: skillForm.description.trim() || undefined,
                     agentRole: skillForm.agentRole,
-                    content: skillForm.content,
+                    // Merge companion files inline so agents receive everything in one block
+                    content: (() => {
+                        const extras = Object.entries(companionFiles)
+                            .filter(([, c]) => c.trim())
+                            .map(([fname, c]) => `\n\n---\n<!-- companion: ${fname} -->\n${c.trim()}`);
+                        return skillForm.content + extras.join('');
+                    })(),
                     sourceUrl: skillForm.sourceUrl.trim() || undefined,
                     priority: skillForm.priority,
+                    stackTriggers: Object.keys(skillForm.stackTriggers).length > 0
+                        ? skillForm.stackTriggers : null,
                 }),
             });
             const data = await res.json();
             if (data.skill) {
                 setSkills(prev => [data.skill, ...prev]);
-                setSkillForm({ name: '', description: '', agentRole: 'all', content: '', sourceUrl: '', priority: 0 });
+                setSkillForm({ name: '', description: '', agentRole: 'all', content: '', sourceUrl: '', priority: 0, stackTriggers: {} });
+                setCompanionFiles({});
                 addLog('orchestrator', `🧠 Skill "${data.skill.name}" saved for [${data.skill.agentRole}] agent`);
             }
         } catch { addLog('orchestrator', '❌ Failed to save skill', 'ERROR'); }
@@ -425,6 +521,36 @@ export default function DashboardPage() {
             setSkills(prev => prev.filter(s => s.id !== skill.id));
             addLog('orchestrator', `🗑️ Skill "${skill.name}" deleted`);
         } catch { addLog('orchestrator', '❌ Failed to delete skill', 'ERROR'); }
+    };
+
+    const handleDeleteProject = async (projectId: string) => {
+        if (!confirm('Delete this project? This cannot be undone.')) return;
+        setProjectActionLoading(projectId);
+        try {
+            await fetch(`/api/projects/${projectId}`, { method: 'DELETE' });
+            setProjects(prev => prev.filter(p => p.id !== projectId));
+            if (activeProject?.id === projectId) setActiveProject(null);
+            addLog('orchestrator', '🗑️ Project deleted');
+        } catch { addLog('orchestrator', '❌ Failed to delete project', 'ERROR'); }
+        finally { setProjectActionLoading(null); }
+    };
+
+    const handleUpdateProjectStack = async (projectId: string, stack: StackConfig) => {
+        setProjectActionLoading(projectId);
+        try {
+            const res = await fetch(`/api/projects/${projectId}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ stack }),
+            });
+            if (!res.ok) throw new Error('Failed');
+            const { project } = await res.json();
+            setProjects(prev => prev.map(p => p.id === projectId ? { ...p, stack: project.stack } : p));
+            if (activeProject?.id === projectId) setActiveProject(prev => prev ? { ...prev, stack: project.stack } : prev);
+            setEditingProjectId(null);
+            addLog('orchestrator', '✅ Stack updated for project');
+        } catch { addLog('orchestrator', '❌ Failed to update stack', 'ERROR'); }
+        finally { setProjectActionLoading(null); }
     };
 
     return (
@@ -534,14 +660,15 @@ export default function DashboardPage() {
 
                 {/* ── Tabs ── */}
                 <div className="flex gap-1 bg-gray-900/40 rounded-xl p-1 border border-gray-800">
-                    {(['team', 'tasks', 'logs', 'skills'] as const).map(tab => (
+                    {(['team', 'tasks', 'logs', 'skills', 'projects'] as const).map(tab => (
                         <button key={tab} id={`tab-${tab}`} onClick={() => setActiveTab(tab)}
                             className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium transition-all ${activeTab === tab ? 'bg-gray-800 text-white' : 'text-gray-500 hover:text-gray-300'
                                 }`}>
                             {tab === 'team' ? '👥 Team'
                                 : tab === 'tasks' ? `📋 Tasks${tasks.length > 0 ? ` (${tasks.length})` : ''}`
                                     : tab === 'logs' ? '📡 Logs'
-                                        : `🧠 Skills${skills.length > 0 ? ` (${skills.length})` : ''}`}
+                                        : tab === 'skills' ? `🧠 Skills${skills.length > 0 ? ` (${skills.length})` : ''}`
+                                            : `📁 Projects${projects.length > 0 ? ` (${projects.length})` : ''}`}
                         </button>
                     ))}
                 </div>
@@ -672,11 +799,83 @@ export default function DashboardPage() {
                                     <label className="text-xs text-gray-400 block mb-1">Skill Content * (paste SKILL.md or custom instructions)</label>
                                     <textarea id="skill-content"
                                         value={skillForm.content}
-                                        onChange={e => setSkillForm(p => ({ ...p, content: e.target.value }))}
+                                        onChange={e => {
+                                            const content = e.target.value;
+                                            setSkillForm(p => ({ ...p, content }));
+                                            // Auto-detect companion .md file references in the pasted content
+                                            const refs = parseCompanionRefs(content);
+                                            setCompanionFiles(prev => {
+                                                const next: Record<string, string> = {};
+                                                refs.forEach(f => { next[f] = prev[f] ?? ''; });
+                                                return next;
+                                            });
+                                        }}
                                         placeholder="Paste the full SKILL.md content here, or write custom expert instructions for the agent..."
                                         rows={8}
                                         className="w-full bg-gray-800 border border-gray-700 text-sm text-white rounded-lg px-3 py-2 focus:outline-none focus:border-purple-500/60 font-mono resize-y"
                                     />
+                                </div>
+
+                                {/* Companion .md file paste slots */}
+                                {Object.keys(companionFiles).length > 0 && (
+                                    <div className="space-y-3 border border-purple-800/40 rounded-xl p-4 bg-purple-950/20">
+                                        <div className="flex items-start gap-2">
+                                            <span className="text-xs font-semibold text-purple-400">📎 Companion files detected</span>
+                                            <span className="text-xs text-gray-600">Paste each file&apos;s content so agents receive everything inline. Leave empty to skip.</span>
+                                        </div>
+                                        {Object.keys(companionFiles).map(fname => (
+                                            <div key={fname}>
+                                                <label className="text-xs text-gray-400 block mb-1 font-mono">{fname}</label>
+                                                <textarea
+                                                    value={companionFiles[fname]}
+                                                    onChange={e => setCompanionFiles(p => ({ ...p, [fname]: e.target.value }))}
+                                                    placeholder={`Paste the content of ${fname} here…`}
+                                                    rows={4}
+                                                    className={`w-full bg-gray-800 text-sm text-white rounded-lg px-3 py-2 focus:outline-none font-mono resize-y transition-colors ${companionFiles[fname].trim()
+                                                        ? 'border border-purple-600/50 focus:border-purple-500'
+                                                        : 'border border-dashed border-gray-600 focus:border-purple-500/60'
+                                                        }`}
+                                                />
+                                                {!companionFiles[fname].trim() && (
+                                                    <p className="text-xs text-gray-600 mt-0.5">⏩ Empty — will be skipped on save.</p>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+
+                                {/* Stack Triggers — auto-activation filter */}
+                                <div>
+                                    <label className="text-xs text-gray-400 block mb-1">
+                                        🎯 Stack Triggers <span className="text-gray-600">(skill only injects when project stack matches — leave empty = always active)</span>
+                                    </label>
+                                    <div className="flex flex-wrap gap-2">
+                                        {(['frontend', 'backend', 'database', 'deploy', 'testing', 'mobile'] as const).map(cat => (
+                                            <select
+                                                key={cat}
+                                                value={skillForm.stackTriggers[cat] ?? ''}
+                                                onChange={e => {
+                                                    const val = e.target.value;
+                                                    setSkillForm(p => {
+                                                        const t = { ...p.stackTriggers };
+                                                        if (val) t[cat] = val; else delete t[cat];
+                                                        return { ...p, stackTriggers: t };
+                                                    });
+                                                }}
+                                                className="bg-gray-800 border border-gray-700 text-xs text-gray-300 rounded-lg px-2 py-1.5 focus:outline-none focus:border-purple-500/40"
+                                            >
+                                                <option value="">{cat}: any</option>
+                                                {getStackOptions(cat as StackCategory).map(k => (
+                                                    <option key={k} value={k}>{k}</option>
+                                                ))}
+                                            </select>
+                                        ))}
+                                    </div>
+                                    {Object.keys(skillForm.stackTriggers).length > 0 && (
+                                        <p className="text-xs text-purple-400 mt-1">
+                                            ⚡ Active only when: {Object.entries(skillForm.stackTriggers).map(([k, v]) => `${k}=${v}`).join(', ')}
+                                        </p>
+                                    )}
                                 </div>
 
                                 <div className="flex items-center gap-3">
@@ -732,11 +931,35 @@ export default function DashboardPage() {
                                                 <a href={skill.sourceUrl} target="_blank" rel="noopener"
                                                     className="text-xs text-purple-400 hover:underline">{skill.sourceUrl}</a>
                                             )}
+                                            {/* Stack trigger chips */}
+                                            {skill.stackTriggers && Object.keys(skill.stackTriggers).length > 0 && (
+                                                <div className="flex flex-wrap gap-1 mt-1">
+                                                    {Object.entries(skill.stackTriggers).map(([k, v]) => (
+                                                        <span key={k} className="text-xs bg-purple-900/30 border border-purple-700/30 text-purple-300 px-2 py-0.5 rounded-full">
+                                                            🎯 {k}={v}
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            )}
                                             <p className="text-xs text-gray-600 mt-1 font-mono">
                                                 {skill.content.slice(0, 120)}{skill.content.length > 120 ? '…' : ''}
                                             </p>
                                         </div>
                                         <div className="flex items-center gap-2 shrink-0">
+                                            <button
+                                                onClick={() => {
+                                                    setTestingSkill(skill);
+                                                    setSkillTestRole(skill.agentRole === 'all' ? 'ux' : skill.agentRole);
+                                                    setSkillTestPrompt('');
+                                                    setSkillTestResult(null);
+                                                    setSkillTestError(null);
+                                                    setShowPromptPreview(false);
+                                                }}
+                                                className="text-xs bg-amber-900/30 text-amber-400 hover:bg-amber-900/50 px-3 py-1 rounded-lg transition-colors border border-amber-700/30"
+                                                title="Test this skill with a sample prompt"
+                                            >
+                                                🧪 Test
+                                            </button>
                                             <button
                                                 onClick={() => handleToggleSkill(skill)}
                                                 className={`text-xs px-3 py-1 rounded-lg transition-colors ${skill.isActive
@@ -758,6 +981,167 @@ export default function DashboardPage() {
                             </div>
                         </motion.div>
                     )}
+
+                    {activeTab === 'projects' && (
+                        <motion.div key="projects" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+                            className="space-y-4">
+                            <div className="flex items-center justify-between">
+                                <h2 className="text-sm font-semibold text-cyan-400 uppercase tracking-widest">📁 Projects</h2>
+                                <button
+                                    onClick={() => setShowProjectWizard(true)}
+                                    className="bg-cyan-700 hover:bg-cyan-600 text-white text-xs px-3 py-1.5 rounded-lg transition-colors"
+                                >+ New Project</button>
+                            </div>
+
+                            {projects.length === 0 ? (
+                                <EmptyState icon="📁" text="No projects yet. Create one to give agents stack context." />
+                            ) : (
+                                <div className="space-y-3">
+                                    {projects.map(project => {
+                                        const isEditing = editingProjectId === project.id;
+                                        const isLoading = projectActionLoading === project.id;
+                                        const isBlank = STACK_CATEGORIES.every(c => !project.stack[c]);
+
+                                        return (
+                                            <div key={project.id}
+                                                className={`bg-gray-900/60 border rounded-xl p-4 space-y-3 transition-all ${activeProject?.id === project.id ? 'border-cyan-500/40' : 'border-gray-800'}`}>
+                                                {/* Row 1: name + actions */}
+                                                <div className="flex items-start justify-between gap-3">
+                                                    <div className="min-w-0">
+                                                        <div className="flex items-center gap-2">
+                                                            <p className="font-semibold text-white text-sm truncate">{project.name}</p>
+                                                            {activeProject?.id === project.id && (
+                                                                <span className="text-xs px-1.5 py-0.5 rounded-full bg-cyan-900/40 text-cyan-400 shrink-0">Active</span>
+                                                            )}
+                                                            {isBlank && (
+                                                                <span className="text-xs px-1.5 py-0.5 rounded-full bg-yellow-900/40 text-yellow-400 shrink-0">No stack set</span>
+                                                            )}
+                                                        </div>
+                                                        {project.description && (
+                                                            <p className="text-xs text-gray-500 mt-0.5 truncate">{project.description}</p>
+                                                        )}
+                                                        <p className="text-xs text-gray-700 mt-0.5">{new Date(project.createdAt).toLocaleDateString()}</p>
+                                                    </div>
+                                                    <div className="flex items-center gap-1.5 shrink-0">
+                                                        {activeProject?.id !== project.id && (
+                                                            <button
+                                                                onClick={() => setActiveProject(project)}
+                                                                className="text-xs text-cyan-600 hover:text-cyan-400 px-2 py-1 rounded-lg border border-gray-700 hover:border-cyan-600/40 transition-colors"
+                                                            >Set active</button>
+                                                        )}
+                                                        <button
+                                                            onClick={() => {
+                                                                if (isEditing) { setEditingProjectId(null); } else {
+                                                                    setEditingProjectId(project.id);
+                                                                    setEditingStack({ ...project.stack });
+                                                                }
+                                                            }}
+                                                            className="text-xs text-gray-500 hover:text-white px-2 py-1 rounded-lg border border-gray-700 hover:border-gray-500 transition-colors"
+                                                        >{isEditing ? 'Cancel' : '✏️ Edit Stack'}</button>
+                                                        <button
+                                                            onClick={() => handleDeleteProject(project.id)}
+                                                            disabled={isLoading}
+                                                            className="text-xs text-gray-600 hover:text-red-400 px-2 py-1 rounded-lg border border-gray-800 hover:border-red-900/40 transition-colors disabled:opacity-40"
+                                                            title="Delete project"
+                                                        >{isLoading ? '⟳' : '🗑'}</button>
+                                                    </div>
+                                                </div>
+
+                                                {/* Row 2: stack chips (display mode) */}
+                                                {!isEditing && (
+                                                    <div className="flex flex-wrap gap-1.5">
+                                                        {STACK_CATEGORIES.map(cat => {
+                                                            const key = project.stack[cat];
+                                                            return key ? (
+                                                                <span key={cat}
+                                                                    className="text-xs bg-gray-800 border border-gray-700 text-gray-300 px-2 py-0.5 rounded-full flex items-center gap-1">
+                                                                    <span>{STACK_CATEGORY_ICONS[cat]}</span>
+                                                                    <span>{key}</span>
+                                                                </span>
+                                                            ) : (
+                                                                <span key={cat}
+                                                                    className="text-xs border border-dashed border-gray-700 text-gray-700 px-2 py-0.5 rounded-full flex items-center gap-1">
+                                                                    <span>{STACK_CATEGORY_ICONS[cat]}</span>
+                                                                    <span className="capitalize">{cat}</span>: unset
+                                                                </span>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                )}
+
+                                                {/* Row 3: inline stack editor */}
+                                                {isEditing && (
+                                                    <div className="space-y-2">
+                                                        {/* Preset quick-fill */}
+                                                        <div>
+                                                            <p className="text-xs text-gray-500 mb-1.5">Quick preset <span className="text-gray-700">(auto-fills all slots):</span></p>
+                                                            <div className="flex flex-wrap gap-1.5">
+                                                                {PROJECT_PRESETS.map(preset => (
+                                                                    <button
+                                                                        key={preset.label}
+                                                                        type="button"
+                                                                        title={preset.hint}
+                                                                        onClick={() => setEditingStack({ ...preset.stack })}
+                                                                        className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg border border-gray-700 bg-gray-800/60 text-gray-300 hover:border-cyan-500/50 hover:text-white transition-all"
+                                                                    >
+                                                                        <span>{preset.icon}</span>
+                                                                        <span>{preset.label}</span>
+                                                                    </button>
+                                                                ))}
+                                                            </div>
+                                                            {(() => {
+                                                                const matched = PROJECT_PRESETS.find(p =>
+                                                                    p.stack.frontend === editingStack.frontend &&
+                                                                    p.stack.mobile === editingStack.mobile
+                                                                );
+                                                                return matched ? (
+                                                                    <p className="text-xs text-cyan-700 mt-1 flex items-center gap-1">
+                                                                        <span>{matched.icon}</span>
+                                                                        <span>{matched.hint}</span>
+                                                                    </p>
+                                                                ) : null;
+                                                            })()}
+                                                        </div>
+                                                        <p className="text-xs text-gray-600">Or customize each slot individually:</p>
+                                                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                                                            {STACK_CATEGORIES.map(cat => (
+                                                                <div key={cat}>
+                                                                    <label className="text-xs text-gray-500 capitalize flex items-center gap-1 mb-1">
+                                                                        <span>{STACK_CATEGORY_ICONS[cat]}</span> {cat}
+                                                                    </label>
+                                                                    <select
+                                                                        value={editingStack[cat] ?? ''}
+                                                                        onChange={e => setEditingStack(prev => ({ ...prev, [cat]: e.target.value || undefined }))}
+                                                                        className="w-full bg-gray-800 border border-gray-700 text-xs text-white rounded-lg px-2 py-1.5 focus:outline-none focus:border-cyan-500/40"
+                                                                    >
+                                                                        <option value="">— none —</option>
+                                                                        {getStackOptions(cat).map(k => (
+                                                                            <option key={k} value={k}>{STACK_LIBRARY[cat][k].label}</option>
+                                                                        ))}
+                                                                    </select>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                        <div className="flex gap-2 pt-1">
+                                                            <button
+                                                                onClick={() => handleUpdateProjectStack(project.id, editingStack)}
+                                                                disabled={isLoading}
+                                                                className="bg-cyan-700 hover:bg-cyan-600 disabled:opacity-40 text-white text-xs px-4 py-1.5 rounded-lg transition-colors"
+                                                            >{isLoading ? '⟳ Saving…' : '💾 Save Stack'}</button>
+                                                            <button
+                                                                onClick={() => setEditingProjectId(null)}
+                                                                className="text-xs text-gray-500 hover:text-gray-300 px-3 py-1.5 rounded-lg border border-gray-700 transition-colors"
+                                                            >Cancel</button>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </motion.div>
+                    )}
                 </AnimatePresence>
             </main>
 
@@ -768,6 +1152,217 @@ export default function DashboardPage() {
                         onClose={() => setShowProjectWizard(false)}
                         onCreated={handleProjectCreated}
                     />
+                )}
+            </AnimatePresence>
+
+            {/* ── Skill Test Modal ── */}
+            <AnimatePresence>
+                {testingSkill && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+                        onClick={e => { if (e.target === e.currentTarget) setTestingSkill(null); }}
+                    >
+                        <motion.div
+                            initial={{ scale: 0.95, y: 16 }}
+                            animate={{ scale: 1, y: 0 }}
+                            exit={{ scale: 0.95, y: 16 }}
+                            className="bg-gray-900 border border-amber-500/30 rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col"
+                            style={{ boxShadow: '0 0 40px rgba(245,158,11,0.1)' }}
+                        >
+                            {/* Header */}
+                            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800">
+                                <div>
+                                    <h3 className="text-sm font-semibold text-amber-400">🧪 Test Skill</h3>
+                                    <p className="text-xs text-gray-500 mt-0.5">"{testingSkill.name}"</p>
+                                </div>
+                                <div className="flex items-center gap-3">
+                                    {/* Mode toggle */}
+                                    <div className="flex rounded-lg border border-gray-700 overflow-hidden text-xs">
+                                        <button
+                                            onClick={() => { setSkillTestMode('prompt-only'); setSkillTestResult(null); setSkillTestError(null); }}
+                                            className={`px-3 py-1.5 transition-colors ${skillTestMode === 'prompt-only'
+                                                ? 'bg-gray-700 text-white'
+                                                : 'bg-transparent text-gray-500 hover:text-gray-300'
+                                                }`}
+                                            title="Show built system prompt only — no tokens consumed"
+                                        >
+                                            📋 Prompt only
+                                        </button>
+                                        <button
+                                            onClick={() => { setSkillTestMode('llm-call'); setSkillTestResult(null); setSkillTestError(null); }}
+                                            className={`px-3 py-1.5 transition-colors border-l border-gray-700 ${skillTestMode === 'llm-call'
+                                                ? 'bg-amber-800/60 text-amber-300'
+                                                : 'bg-transparent text-gray-500 hover:text-gray-300'
+                                                }`}
+                                            title="Call the real LLM — consumes tokens"
+                                        >
+                                            🤖 Real LLM call
+                                        </button>
+                                    </div>
+                                    <button onClick={() => setTestingSkill(null)} className="text-gray-600 hover:text-gray-300 text-lg transition-colors">✕</button>
+                                </div>
+                            </div>
+
+                            {/* Body — scrollable */}
+                            <div className="flex-1 overflow-y-auto p-5 space-y-4">
+                                {/* Role + prompt inputs */}
+                                <div className="grid grid-cols-3 gap-3">
+                                    <div>
+                                        <label className="text-xs text-gray-400 block mb-1">Agent Role</label>
+                                        <select
+                                            value={skillTestRole}
+                                            onChange={e => setSkillTestRole(e.target.value)}
+                                            className="w-full bg-gray-800 border border-gray-700 text-sm text-white rounded-lg px-3 py-2 focus:outline-none focus:border-amber-500/60"
+                                        >
+                                            {['devops', 'backend', 'qa', 'ux', 'security', 'orchestrator'].map(r => (
+                                                <option key={r} value={r}>{r}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <div className="col-span-2">
+                                        <label className="text-xs text-gray-400 block mb-1">Active Project (for stack context)</label>
+                                        <select
+                                            value={activeProject?.id ?? ''}
+                                            onChange={e => {
+                                                const p = projects.find(p => p.id === e.target.value) ?? null;
+                                                setActiveProject(p);
+                                            }}
+                                            className="w-full bg-gray-800 border border-gray-700 text-sm text-white rounded-lg px-3 py-2 focus:outline-none focus:border-amber-500/60"
+                                        >
+                                            <option value="">— no project —</option>
+                                            {projects.map(p => (
+                                                <option key={p.id} value={p.id}>{p.name}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label className="text-xs text-gray-400 block mb-1">Test Prompt *</label>
+                                    <textarea
+                                        value={skillTestPrompt}
+                                        onChange={e => setSkillTestPrompt(e.target.value)}
+                                        placeholder="e.g. Write a hero section for a Bootstrap 5 landing page"
+                                        rows={3}
+                                        className="w-full bg-gray-800 border border-gray-700 text-sm text-white rounded-lg px-3 py-2 focus:outline-none focus:border-amber-500/60 resize-none font-mono"
+                                    />
+                                </div>
+
+                                {/* Error */}
+                                {skillTestError && (
+                                    <div className="bg-red-900/30 border border-red-700/40 rounded-lg p-3 text-xs text-red-400">
+                                        ❌ {skillTestError}
+                                    </div>
+                                )}
+
+                                {/* Results */}
+                                {skillTestResult && (
+                                    <div className="space-y-3">
+                                        {/* Stats bar */}
+                                        <div className="flex flex-wrap gap-3 text-xs">
+                                            <span className="bg-gray-800 rounded-lg px-2.5 py-1 text-gray-400">
+                                                📏 Prompt: <span className="text-white">{skillTestResult.promptChars.toLocaleString()} chars</span>
+                                            </span>
+                                            <span className="bg-purple-900/30 border border-purple-700/30 rounded-lg px-2.5 py-1 text-gray-400">
+                                                🧠 Skill: <span className="text-purple-300">{skillTestResult.skillChars.toLocaleString()} chars</span>
+                                            </span>
+                                            <span className="bg-gray-800 rounded-lg px-2.5 py-1 text-gray-400">
+                                                🤖 <span className="text-white">{skillTestResult.model}</span>
+                                            </span>
+                                        </div>
+
+                                        {/* Prompt preview (collapsible) */}
+                                        <div className="bg-gray-800/60 rounded-lg border border-gray-700/40 overflow-hidden">
+                                            <button
+                                                onClick={() => setShowPromptPreview(p => !p)}
+                                                className="w-full flex items-center justify-between px-3 py-2 text-xs text-gray-500 hover:text-gray-300 transition-colors"
+                                            >
+                                                <span>📋 Full system prompt</span>
+                                                <span>{showPromptPreview ? '▲ hide' : '▼ show'}</span>
+                                            </button>
+                                            {showPromptPreview && (
+                                                <pre className="px-3 pb-3 font-mono text-xs text-gray-400 whitespace-pre-wrap break-words max-h-48 overflow-y-auto border-t border-gray-700/40">
+                                                    {skillTestResult.promptPreview}
+                                                </pre>
+                                            )}
+                                        </div>
+
+                                        {/* LLM Response */}
+                                        <div className="bg-gray-800/60 rounded-lg border border-amber-700/20 overflow-hidden">
+                                            <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-700/40 bg-amber-900/10">
+                                                <span className="text-xs text-amber-400 font-semibold">🤖 Agent Response</span>
+                                            </div>
+                                            <pre className="p-3 font-mono text-xs text-gray-300 whitespace-pre-wrap break-words max-h-64 overflow-y-auto">
+                                                {skillTestResult.response}
+                                            </pre>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Footer */}
+                            <div className="px-5 py-3 border-t border-gray-800 flex items-center justify-between gap-3">
+                                {skillTestMode === 'prompt-only' ? (
+                                    <span className="text-xs text-green-700">✅ Free — only builds the system prompt, no LLM call</span>
+                                ) : (
+                                    <span className="text-xs text-amber-700">⚠️ Real tokens consumed — uses the agent&apos;s configured LLM</span>
+                                )}
+                                <div className="flex gap-2">
+                                    <button
+                                        onClick={() => setTestingSkill(null)}
+                                        className="text-xs text-gray-500 hover:text-gray-300 px-4 py-2 rounded-lg border border-gray-700 transition-colors"
+                                    >
+                                        Close
+                                    </button>
+                                    <button
+                                        onClick={async () => {
+                                            const isPromptOnly = skillTestMode === 'prompt-only';
+                                            if (!isPromptOnly && !skillTestPrompt.trim()) return;
+                                            setSkillTestLoading(true);
+                                            setSkillTestError(null);
+                                            setSkillTestResult(null);
+                                            try {
+                                                const res = await fetch('/api/skills/preview', {
+                                                    method: 'POST',
+                                                    headers: { 'Content-Type': 'application/json' },
+                                                    body: JSON.stringify({
+                                                        skillId: testingSkill.id,
+                                                        agentRole: skillTestRole,
+                                                        userRequest: skillTestPrompt || '(preview only)',
+                                                        projectId: activeProject?.id,
+                                                        promptOnly: isPromptOnly,
+                                                    }),
+                                                });
+                                                const data = await res.json();
+                                                if (!res.ok) throw new Error(data.error ?? 'Preview failed');
+                                                setSkillTestResult(data);
+                                                // In prompt-only mode, auto-expand the prompt view
+                                                if (isPromptOnly) setShowPromptPreview(true);
+                                            } catch (e) {
+                                                setSkillTestError(e instanceof Error ? e.message : String(e));
+                                            } finally {
+                                                setSkillTestLoading(false);
+                                            }
+                                        }}
+                                        disabled={skillTestLoading || (skillTestMode === 'llm-call' && !skillTestPrompt.trim())}
+                                        className={`text-xs disabled:opacity-40 text-white px-5 py-2 rounded-lg font-semibold transition-colors flex items-center gap-2 ${skillTestMode === 'prompt-only'
+                                            ? 'bg-gray-600 hover:bg-gray-500'
+                                            : 'bg-amber-600 hover:bg-amber-500'
+                                            }`}
+                                    >
+                                        {skillTestLoading
+                                            ? <><span className="inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" /> Loading&hellip;</>
+                                            : skillTestMode === 'prompt-only'
+                                                ? '📋 Build Prompt'
+                                                : '🧪 Run LLM Test'}
+                                    </button>
+                                </div>
+                            </div>
+                        </motion.div>
+                    </motion.div>
                 )}
             </AnimatePresence>
         </div>
@@ -1152,6 +1747,38 @@ function ProjectWizard({ onClose, onCreated }: {
                     />
                 </div>
 
+                {/* ── Project-type presets ── */}
+                <div className="space-y-1.5">
+                    <label className="text-xs text-gray-400 block">Quick Preset  <span className="text-gray-600">(auto-fills stack)</span></label>
+                    <div className="flex flex-wrap gap-1.5">
+                        {PROJECT_PRESETS.map(preset => (
+                            <button
+                                key={preset.label}
+                                type="button"
+                                title={preset.hint}
+                                onClick={() => setStack({ ...preset.stack })}
+                                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-gray-700 bg-gray-800/60 text-gray-300 hover:border-cyan-500/50 hover:text-white hover:bg-gray-800 transition-all"
+                            >
+                                <span>{preset.icon}</span>
+                                <span>{preset.label}</span>
+                            </button>
+                        ))}
+                    </div>
+                    {/* Hint for currently-set preset */}
+                    {(() => {
+                        const matched = PROJECT_PRESETS.find(p =>
+                            p.stack.frontend === stack.frontend &&
+                            p.stack.mobile === stack.mobile
+                        );
+                        return matched ? (
+                            <p className="text-xs text-cyan-700 flex items-center gap-1.5 pt-0.5">
+                                <span>{matched.icon}</span>
+                                <span>{matched.hint}</span>
+                            </p>
+                        ) : null;
+                    })()}
+                </div>
+
                 {/* Stack Pickers */}
                 <div className="space-y-2">
                     <label className="text-xs text-gray-400 block">Tech Stack</label>
@@ -1211,18 +1838,194 @@ function ProjectWizard({ onClose, onCreated }: {
 }
 
 // ── Task Card ────────────────────────────────────────────────────────────────
+
+/** Detect a file extension from result content for smart download naming */
+function detectExt(content: string): string {
+    const t = content.trimStart();
+    if (/^<!doctype html/i.test(t) || /^<html/i.test(t)) return 'html';
+    if (/^```html/i.test(t)) return 'html';
+    if (/^```css/i.test(t)) return 'css';
+    if (/^```typescript/i.test(t) || /^```tsx/i.test(t)) return 'tsx';
+    if (/^```javascript/i.test(t) || /^```jsx/i.test(t)) return 'jsx';
+    if (/^```json/i.test(t) || (t.startsWith('{') && t.endsWith('}'))) return 'json';
+    if (/^```python/i.test(t) || /^```py/i.test(t)) return 'py';
+    if (/^```sql/i.test(t)) return 'sql';
+    if (/^```yaml/i.test(t) || /^```yml/i.test(t)) return 'yml';
+    if (/^```bash/i.test(t) || /^```sh/i.test(t)) return 'sh';
+    if (/^```/i.test(t)) return 'txt';
+    return 'txt';
+}
+
+/** Download text as a file */
+function downloadText(content: string, filename: string) {
+    const blob = new Blob([content], { type: 'text/plain; charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
+// ── Multi-file project helpers ─────────────────────────────────────────────────
+
+interface ParsedFile { path: string; content: string; }
+
+/**
+ * Detect if a result string contains === FILE: path === delimiters.
+ * Returns a list of { path, content } objects, or null if no delimiters found.
+ */
+function parseFileBlocks(result: string): ParsedFile[] | null {
+    const FILE_RE = /^===\s*FILE:\s*(.+?)\s*===\s*$/m;
+    if (!FILE_RE.test(result)) return null;
+
+    const blocks: ParsedFile[] = [];
+    const parts = result.split(/^===\s*FILE:\s*(.+?)\s*===\s*$/m);
+    // parts layout: [leading, path1, content1, path2, content2, ...]
+    for (let i = 1; i < parts.length; i += 2) {
+        const path = parts[i]?.trim();
+        const content = (parts[i + 1] ?? '').trim();
+        if (path) blocks.push({ path, content });
+    }
+    return blocks.length > 0 ? blocks : null;
+}
+
+/** Download all files as a ZIP using jszip */
+async function downloadZip(files: ParsedFile[], zipName: string) {
+    const JSZip = (await import('jszip')).default;
+    const zip = new JSZip();
+    for (const f of files) {
+        zip.file(f.path, f.content);
+    }
+    const blob = await zip.generateAsync({ type: 'blob' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${zipName}.zip`;
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
+/** File icon from extension */
+function fileIcon(filePath: string): string {
+    const ext = filePath.split('.').pop()?.toLowerCase() ?? '';
+    const icons: Record<string, string> = {
+        html: '🌐', css: '🎨', ts: '🔷', tsx: '⚛️', js: '🟨', jsx: '⚛️',
+        json: '📋', md: '📝', py: '🐍', sh: '🖥️', yml: '⚙️', yaml: '⚙️',
+        sql: '🗄️', env: '🔐', gitignore: '🚫', dockerfile: '🐋', txt: '📄',
+    };
+    return icons[ext] ?? '📄';
+}
+
+/** Renders a multi-file project tree with per-file actions and a ZIP download button */
+function FileTreeView({ files, slug }: { files: ParsedFile[]; slug: string }) {
+    const [selectedIdx, setSelectedIdx] = useState(0);
+    const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
+    const [zipping, setZipping] = useState(false);
+
+    const selected = files[selectedIdx];
+
+    const handleCopy = async (content: string, idx: number) => {
+        await navigator.clipboard.writeText(content);
+        setCopiedIdx(idx);
+        setTimeout(() => setCopiedIdx(null), 1800);
+    };
+
+    const handleZip = async () => {
+        setZipping(true);
+        try { await downloadZip(files, slug); } finally { setZipping(false); }
+    };
+
+    return (
+        <div className="mt-2 rounded-lg border border-gray-700/50 overflow-hidden bg-gray-900/80">
+            {/* Toolbar */}
+            <div className="flex items-center justify-between px-3 py-2 bg-gray-800 border-b border-gray-700/50">
+                <span className="text-xs text-gray-400 font-mono">
+                    📦 {files.length} file{files.length !== 1 ? 's' : ''} · project structure
+                </span>
+                <button
+                    onClick={handleZip}
+                    disabled={zipping}
+                    className="flex items-center gap-1.5 text-xs bg-cyan-700 hover:bg-cyan-600 disabled:opacity-50 text-white px-3 py-1 rounded-md transition-colors font-medium"
+                >
+                    {zipping ? '⏳ Zipping…' : '⬇️ Download ZIP'}
+                </button>
+            </div>
+
+            <div className="flex" style={{ minHeight: '280px', maxHeight: '70vh' }}>
+                {/* File tree sidebar */}
+                <div className="w-52 shrink-0 border-r border-gray-700/50 overflow-y-auto bg-gray-900/60">
+                    {files.map((f, i) => (
+                        <button
+                            key={i}
+                            onClick={() => setSelectedIdx(i)}
+                            className={`w-full text-left px-3 py-1.5 text-xs font-mono truncate flex items-center gap-1.5 transition-colors ${selectedIdx === i
+                                ? 'bg-cyan-900/40 text-cyan-300 border-l-2 border-cyan-500'
+                                : 'text-gray-400 hover:bg-gray-800/60 hover:text-gray-200 border-l-2 border-transparent'
+                                }`}
+                            title={f.path}
+                        >
+                            <span>{fileIcon(f.path)}</span>
+                            <span className="truncate">{f.path}</span>
+                        </button>
+                    ))}
+                </div>
+
+                {/* Code viewer */}
+                <div className="flex-1 overflow-hidden flex flex-col min-w-0">
+                    {selected && (
+                        <>
+                            {/* File header */}
+                            <div className="flex items-center justify-between px-3 py-1.5 bg-gray-800/60 border-b border-gray-700/40 shrink-0">
+                                <span className="text-xs text-gray-400 font-mono truncate">{selected.path}</span>
+                                <div className="flex gap-2 shrink-0">
+                                    <button
+                                        onClick={() => handleCopy(selected.content, selectedIdx)}
+                                        className="text-xs text-gray-500 hover:text-white px-2 py-0.5 rounded hover:bg-gray-700 transition-colors"
+                                    >
+                                        {copiedIdx === selectedIdx ? '✅' : '📋 Copy'}
+                                    </button>
+                                    <button
+                                        onClick={() => downloadText(selected.content, selected.path.split('/').pop() ?? selected.path)}
+                                        className="text-xs text-gray-500 hover:text-cyan-400 px-2 py-0.5 rounded hover:bg-gray-700 transition-colors"
+                                    >
+                                        ⬇️ .{selected.path.split('.').pop()}
+                                    </button>
+                                </div>
+                            </div>
+                            {/* Code content */}
+                            <pre className="flex-1 p-3 font-mono text-xs text-gray-300 whitespace-pre-wrap break-words overflow-auto">
+                                {selected.content}
+                            </pre>
+                        </>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+}
+
 function TaskCard({ task, projectName }: { task: Task; projectName?: string }) {
     const badge = TASK_BADGE[task.status];
     const isLive = task.status === 'PENDING' || task.status === 'THINKING' || task.status === 'EXECUTING';
-    // Auto-expand results when task completes
     const [expanded, setExpanded] = useState(false);
+    const [copied, setCopied] = useState<number | 'all' | null>(null);
     const prevStatus = useRef(task.status);
+
     useEffect(() => {
         if (prevStatus.current !== task.status && task.status === 'SUCCESS' && task.results.length > 0) {
             setExpanded(true);
         }
         prevStatus.current = task.status;
     }, [task.status, task.results.length]);
+
+    const handleCopy = async (text: string, idx: number | 'all') => {
+        await navigator.clipboard.writeText(text);
+        setCopied(idx);
+        setTimeout(() => setCopied(null), 1800);
+    };
+
+    const slug = task.userRequest.slice(0, 30).replace(/[^a-z0-9]+/gi, '-').toLowerCase();
 
     return (
         <div className={`bg-gray-900/60 border rounded-xl p-4 space-y-2 transition-all ${isLive ? 'border-cyan-500/30' : task.status === 'SUCCESS' ? 'border-green-500/20' : task.status === 'FAILED' ? 'border-red-500/20' : 'border-gray-800'
@@ -1243,18 +2046,92 @@ function TaskCard({ task, projectName }: { task: Task; projectName?: string }) {
                 {task.assignedRole && <span>→ <span className="text-gray-400">{task.assignedRole}</span></span>}
                 {task.summary && <span className="text-gray-600 truncate">{task.summary}</span>}
             </div>
+
             {task.results.length > 0 && (
                 <div>
-                    <button onClick={() => setExpanded(!expanded)} className="text-xs text-gray-600 hover:text-gray-400 transition-colors">
-                        {expanded ? '▲ Hide results' : `▼ Show ${task.results.length} result(s)`}
-                    </button>
+                    {/* Header row: toggle + bulk actions */}
+                    <div className="flex items-center gap-3 flex-wrap">
+                        <button onClick={() => setExpanded(!expanded)} className="text-xs text-gray-600 hover:text-gray-400 transition-colors">
+                            {expanded ? '▲ Hide results' : `▼ Show ${task.results.length} result(s)`}
+                        </button>
+                        {expanded && (
+                            <>
+                                {task.results.length > 1 && (
+                                    <button
+                                        onClick={() => handleCopy(task.results.join('\n\n---\n\n'), 'all')}
+                                        className="text-xs text-gray-600 hover:text-gray-300 transition-colors"
+                                        title="Copy all results"
+                                    >
+                                        {copied === 'all' ? '✅ Copied' : '📋 Copy all'}
+                                    </button>
+                                )}
+                                <button
+                                    onClick={() => {
+                                        const all = task.results.join('\n\n---\n\n');
+                                        const ext = detectExt(task.results[0] ?? '');
+                                        downloadText(all, `${slug}.${task.results.length > 1 ? 'txt' : ext}`);
+                                    }}
+                                    className="text-xs text-gray-600 hover:text-cyan-400 transition-colors"
+                                    title="Download result(s) as file"
+                                >
+                                    ⬇️ Download
+                                </button>
+                            </>
+                        )}
+                    </div>
+
                     <AnimatePresence>
                         {expanded && (
-                            <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}
-                                className="mt-2 bg-gray-800/50 rounded-lg p-3 font-mono text-xs text-gray-300 space-y-2 overflow-hidden max-h-64 overflow-y-auto">
-                                {task.results.map((r, i) => (
-                                    <div key={i} className="border-b border-gray-700/50 pb-2 last:border-0 last:pb-0 whitespace-pre-wrap">{r}</div>
-                                ))}
+                            <motion.div
+                                initial={{ height: 0, opacity: 0 }}
+                                animate={{ height: 'auto', opacity: 1 }}
+                                exit={{ height: 0, opacity: 0 }}
+                                className="mt-2 space-y-3 overflow-hidden"
+                            >
+                                {task.results.map((r, i) => {
+                                    const files = parseFileBlocks(r);
+                                    if (files) {
+                                        // ── Multi-file project output ──────────────────────────
+                                        return (
+                                            <div key={i}>
+                                                <FileTreeView files={files} slug={`${slug}-${i + 1}`} />
+                                            </div>
+                                        );
+                                    }
+                                    // ── Single-file / plain text output ───────────────────────
+                                    return (
+                                        <div key={i} className="bg-gray-800/70 rounded-lg overflow-hidden border border-gray-700/40">
+                                            {/* Per-result toolbar */}
+                                            <div className="flex items-center justify-between px-3 py-1.5 bg-gray-800 border-b border-gray-700/40">
+                                                <span className="text-xs text-gray-500 font-mono">
+                                                    Result {i + 1} · {r.length.toLocaleString()} chars
+                                                </span>
+                                                <div className="flex gap-2">
+                                                    <button
+                                                        onClick={() => handleCopy(r, i)}
+                                                        className="text-xs text-gray-500 hover:text-white transition-colors px-2 py-0.5 rounded hover:bg-gray-700"
+                                                    >
+                                                        {copied === i ? '✅' : '📋 Copy'}
+                                                    </button>
+                                                    <button
+                                                        onClick={() => {
+                                                            const ext = detectExt(r);
+                                                            downloadText(r, `${slug}-result-${i + 1}.${ext}`);
+                                                        }}
+                                                        className="text-xs text-gray-500 hover:text-cyan-400 transition-colors px-2 py-0.5 rounded hover:bg-gray-700"
+                                                        title={`Download as .${detectExt(r)}`}
+                                                    >
+                                                        ⬇️ .{detectExt(r)}
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            {/* Scrollable content */}
+                                            <pre className="p-3 font-mono text-xs text-gray-300 whitespace-pre-wrap break-words overflow-x-auto max-h-[60vh] overflow-y-auto">
+                                                {r}
+                                            </pre>
+                                        </div>
+                                    );
+                                })}
                             </motion.div>
                         )}
                     </AnimatePresence>

@@ -1,0 +1,22 @@
+name: network_speed_test_app
+version: 1.0.0
+description: A simple Flutter app to test network speed.
+
+flutter:
+  uses-material-design: true
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.2
+  speed_test_network: ^1.0.0 # Added for network speed testing
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^2.0.0
+
+flutter_gen:
+  integrations:
+    - assets_gen
+    - fonts_gen

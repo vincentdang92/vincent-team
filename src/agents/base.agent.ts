@@ -151,8 +151,51 @@ export abstract class BaseAgent {
                     results.push(`ERROR: ${msg}`);
                 }
             } else {
-                // Pure reasoning / documentation step
-                results.push(`[Reasoning] ${step.reasoning}`);
+                // No tool declared — ask the LLM to generate the actual deliverable
+                // (e.g. write HTML, write config, write prose) rather than just re-emitting reasoning
+                try {
+                    const config = await this.getModelConfig();
+                    const systemPrompt = await this.getSystemPrompt();
+                    const generateMessages: import('@/lib/model-router').ChatMessage[] = [
+                        { role: 'system', content: systemPrompt },
+                        {
+                            role: 'user',
+                            content: [
+                                `Original task: ${context.userRequest}`,
+                                `Step ${step.stepNumber}: ${step.action}`,
+                                step.reasoning ? `Notes: ${step.reasoning}` : '',
+                                '',
+                                'Please produce the COMPLETE deliverable for this step.',
+                                'CRITICAL: output the ENTIRE content — do NOT truncate, abbreviate, or add "<!-- ... more -->" placeholders.',
+                                '',
+                                'OUTPUT FORMAT RULES:',
+                                '• If this deliverable is a SINGLE FILE (e.g. a simple HTML landing page): output the raw file content only.',
+                                '• If this deliverable spans MULTIPLE FILES (e.g. a React app, Next.js project, mobile app, or any multi-file project structure):',
+                                '  - Use the exact delimiter: === FILE: relative/path/filename.ext ===',
+                                '  - Output EVERY file in full — do not skip or summarise any file.',
+                                '  - Example:',
+                                '    === FILE: package.json ===',
+                                '    { "name": "my-app", ... }',
+                                '    === FILE: src/index.tsx ===',
+                                '    import React from "react";',
+                                '    ...',
+                                '• No extra commentary before, between, or after files.',
+                            ].filter(Boolean).join('\n'),
+                        },
+                    ];
+                    const { callModel } = await import('@/lib/model-router');
+                    // Use a high token limit for generation — full HTML pages can be 6000-12000 tokens
+                    const genConfig = { ...config, maxTokens: Math.max(config.maxTokens ?? 0, 16384) };
+                    const response = await callModel(genConfig, generateMessages);
+                    const generated = response.content;
+                    await this.log(LogType.SUCCESS, `✅ Step ${step.stepNumber} generated: ${generated.slice(0, 120)}…`);
+                    results.push(generated);
+                } catch (genErr) {
+                    // Fallback: emit reasoning so at least something is saved
+                    const msg = genErr instanceof Error ? genErr.message : String(genErr);
+                    await this.log(LogType.WARN as never, `⚠️ Step ${step.stepNumber} generation failed (${msg}) — using reasoning`);
+                    results.push(`[Reasoning] ${step.reasoning}`);
+                }
             }
         }
 
@@ -255,23 +298,71 @@ Respond ONLY with valid JSON in this exact format:
     }
 
     private parsePlan(responseContent: string): AgentPlan {
-        try {
-            // Strip markdown code fences if present
-            const cleaned = responseContent
-                .replace(/^```json\s*/i, '')
-                .replace(/^```\s*/i, '')
-                .replace(/```\s*$/i, '')
-                .trim();
-            return JSON.parse(cleaned) as AgentPlan;
-        } catch {
-            // Fallback plan
-            return {
-                taskSummary: responseContent.slice(0, 200),
-                steps: [{ stepNumber: 1, action: responseContent, reasoning: 'Raw response', tool: undefined }],
-                riskLevel: 'LOW',
-                requiresApproval: false,
-            };
+        const extracted = this.extractJson(responseContent);
+        if (extracted !== null) {
+            try {
+                return JSON.parse(extracted) as AgentPlan;
+            } catch { /* fall through */ }
         }
+
+        // Fallback: treat the whole raw response as a single generate step
+        // so execute() will call the LLM again and actually produce content
+        return {
+            taskSummary: responseContent.slice(0, 200),
+            steps: [{
+                stepNumber: 1,
+                action: 'Generate deliverable based on task request',
+                reasoning: responseContent.slice(0, 500),
+                tool: undefined,
+            }],
+            riskLevel: 'LOW',
+            requiresApproval: false,
+        };
+    }
+
+    /** Extract the first complete JSON object from arbitrary text (handles markdown fences) */
+    private extractJson(text: string): string | null {
+        // 1. Strip common markdown fences first
+        const stripped = text
+            .replace(/^```json\s*/im, '')
+            .replace(/^```\s*/im, '')
+            .replace(/```\s*$/im, '')
+            .trim();
+
+        // 2. Try the stripped version directly
+        if (stripped.startsWith('{')) {
+            // Balance brackets to find the full object
+            let depth = 0;
+            let inString = false;
+            let escape = false;
+            for (let i = 0; i < stripped.length; i++) {
+                const ch = stripped[i];
+                if (escape) { escape = false; continue; }
+                if (ch === '\\' && inString) { escape = true; continue; }
+                if (ch === '"') { inString = !inString; continue; }
+                if (inString) continue;
+                if (ch === '{') depth++;
+                if (ch === '}') { depth--; if (depth === 0) return stripped.slice(0, i + 1); }
+            }
+        }
+
+        // 3. Scan original text for the first '{'
+        const start = text.indexOf('{');
+        if (start === -1) return null;
+        let depth = 0;
+        let inString = false;
+        let escape = false;
+        for (let i = start; i < text.length; i++) {
+            const ch = text[i];
+            if (escape) { escape = false; continue; }
+            if (ch === '\\' && inString) { escape = true; continue; }
+            if (ch === '"') { inString = !inString; continue; }
+            if (inString) continue;
+            if (ch === '{') depth++;
+            if (ch === '}') { depth--; if (depth === 0) return text.slice(start, i + 1); }
+        }
+
+        return null;
     }
 
     protected async setStatus(status: AgentStatus): Promise<void> {

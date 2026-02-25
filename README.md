@@ -1,356 +1,416 @@
 # 🛡️ AI DevOps Guardian
 
-<div align="center">
-
-**The world's most paranoid, stack-aware, skill-powered AI team for your codebase.**
-
-[![Phase](https://img.shields.io/badge/Phase-5%20Active-blueviolet?style=for-the-badge)](.)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.6-blue?style=for-the-badge&logo=typescript)](.)
-[![Next.js](https://img.shields.io/badge/Next.js-15-black?style=for-the-badge&logo=next.js)](.)
-[![Prisma](https://img.shields.io/badge/Prisma-6-2D3748?style=for-the-badge&logo=prisma)](.)
-[![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](.)
-
-</div>
+> **Multi-agent AI platform** — A team of specialized AI agents (DevOps, Backend, QA, UX, Security, Orchestrator) that collaborate to plan, execute, and deliver software engineering tasks. Agents are configurable per-project, per-stack, and per-LLM provider.
 
 ---
 
-## 🧠 What Is This?
+## Table of Contents
 
-AI DevOps Guardian is a **fully autonomous multi-agent AI team** that manages your software projects end-to-end — from writing code to deploying on production VPS — with **military-grade security** that blocks catastrophic commands before they run.
-
-You describe what you want. The Orchestrator routes the task to the right specialist. The specialist reasons, plans, executes, and reports back. All guarded by a paranoid Security Guardian that intercepts every shell command before it touches your servers.
-
-Think of it as hiring 6 elite senior engineers — except they never sleep, never cut corners, and literally cannot run `rm -rf /`.
-
----
-
-## 👥 The Team
-
-| Agent | Emoji | Speciality | Tools |
-|---|---|---|---|
-| **Orchestrator** | 🧠 | Reads your request, classifies the task, routes to the right agent | Reasoning, Planning |
-| **DevOps Senior** | ⚙️ | SSH, Docker, Nginx, CI/CD, systemd, server health | `ssh-execute`, `docker-run` |
-| **Backend Senior** | 🛠️ | REST APIs, DB schemas, auth, business logic, CRUD | `file-write`, `file-read` |
-| **QA Senior** | 🧪 | Test writing, code review, coverage, bug reproduction | `file-write`, `run-tests` |
-| **UX Senior** | 🎨 | React components, accessibility, animations, responsive layouts | `file-write`, `list-dir` |
-| **Security Guardian** | 🛡️ | Validates every shell command. Blocks CRITICAL. Logs HIGH. | Pattern matching, risk scoring |
-
-Every agent:
-- Has a **dynamic system prompt** built from your project's tech stack
-- **Injects your custom skills** from the Skills Library at prompt time
-- Follows a **reason → plan → execute** loop before touching anything
+1. [Architecture Overview](#architecture-overview)
+2. [Agent Team](#agent-team)
+3. [Core Libraries](#core-libraries)
+4. [API Routes](#api-routes)
+5. [Database Schema](#database-schema)
+6. [Feature Map](#feature-map)
+7. [Full Request Flow](#full-request-flow)
+8. [Skill System](#skill-system)
+9. [Agent Memory System](#agent-memory-system)
+10. [Deployment Guide](#deployment-guide)
+11. [Environment Variables](#environment-variables)
+12. [Next Phase Roadmap](#next-phase-roadmap)
 
 ---
 
-## 🌟 Key Features
-
-### 🔐 Zero-Trust Security Guardian
-Every SSH/Docker command passes through a 4-layer filter:
+## Architecture Overview
 
 ```
-Command → Sanitize → Obfuscation Detection → Pattern Match → Risk Score → Verdict
+┌─────────────────────────────────────────────────────────────┐
+│                    Next.js 15 (App Router)                  │
+│  ┌──────────────────────┐   ┌──────────────────────────┐   │
+│  │   Dashboard UI       │   │   API Routes (/api/*)    │   │
+│  │   dashboard/page.tsx │   │   REST + Server-Sent     │   │
+│  └──────────────────────┘   └──────────────────────────┘   │
+│                                      │                      │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │              Agent Layer (src/agents/)               │   │
+│  │  Orchestrator → DevOps / Backend / QA / UX / Sec    │   │
+│  │      BaseAgent: Plan → Execute → Log → Return        │   │
+│  └──────────────────────────────────────────────────────┘   │
+│                                      │                      │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │              Core Libraries (src/lib/)               │   │
+│  │  model-router · prompt-builder · skill-loader        │   │
+│  │  stack-library · memory-store · memory-summarizer    │   │
+│  │  model-config · project-config · socket              │   │
+│  └──────────────────────────────────────────────────────┘   │
+│                                      │                      │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │           Prisma ORM → Supabase (PostgreSQL)         │   │
+│  └──────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────┘
+         │                         │
+  LLM Providers              External Tools
+  Claude / Gemini /           SSH / VPS /
+  DeepSeek / GPT-4o /          Git
+  Ollama (local)
 ```
 
-| Risk | Action | Example |
+---
+
+## Agent Team
+
+| Agent | Role | Default Model |
 |---|---|---|
-| `CRITICAL (100)` | **Auto-blocked, logged** | `rm -rf /`, fork bombs, disk wipes |
-| `HIGH (75+)` | **Blocked, requires approval** | `chmod 777 /etc`, system shutdown |
-| `MEDIUM (40+)` | **Allowed, audited** | `npm install -g`, `chmod 777 /tmp` |
-| `LOW (0-39)` | **Allowed** | `ls -la`, `docker ps`, `git status` |
+| **Orchestrator** | Decomposes tasks, routes subtasks, synthesizes final output | Gemini 2.0 Flash |
+| **DevOps** | CI/CD, Docker, Nginx, VPS provisioning, shell scripts | Gemini 2.0 Flash |
+| **Backend** | APIs, databases, server logic, migrations | Gemini 2.0 Flash |
+| **UX** | Frontend, HTML/CSS/React, design systems, animations | Gemini 2.0 Flash |
+| **QA** | Tests, bug reports, coverage analysis, E2E planning | Gemini 2.0 Flash |
+| **Security** | Vulnerability scan, OWASP, secrets audit, hardening | Gemini 2.0 Flash |
 
-Even obfuscated attacks are caught:
-```bash
-echo "cm0gLXJmIC8=" | base64 -d | bash  # ❌ BLOCKED — obfuscation detected
-$(rm -rf /)                              # ❌ BLOCKED — command substitution detected
-```
+Each agent is independently configurable — different LLM provider, model, and API key per agent. Configuration is persisted in the `Agent.config` JSONB field in the database.
 
 ---
 
-### 📦 Stack-Aware Prompts
-Every agent's system prompt is **generated dynamically** from your project's configured technology stack. A backend agent working on a Laravel + MySQL project gets completely different expertise than one working on NestJS + Prisma.
+## Core Libraries
 
-Supported stack categories:
-
-| Category | Options |
+| File | Purpose |
 |---|---|
-| **Frontend** | React, Vue, Svelte, Next.js, Nuxt, Angular, Astro |
-| **Backend** | Express, NestJS, FastAPI, Laravel, Django, Rails, Go Fiber, Hono |
-| **Database** | PostgreSQL, MySQL, MongoDB, SQLite, Supabase, Redis |
-| **Testing** | Vitest, Jest, PyTest, Playwright, Cypress |
-| **Deploy** | Docker, Kubernetes, PM2, Nginx, Vercel, Railway, Fly.io |
-| **Mobile** | React Native, Flutter, Swift, Kotlin, Capacitor |
+| `model-router.ts` | Routes LLM calls to Claude / Gemini / DeepSeek / GPT-4o / Ollama |
+| `prompt-builder.ts` | Composes dynamic system prompts: role + stack context + skills + memory |
+| `skill-loader.ts` | Loads active skills from DB, applies **stack-aware OR-logic filtering** |
+| `stack-library.ts` | Expert prompt snippets per tech (Bootstrap, Next.js, Docker, etc.) |
+| `memory-store.ts` | Stores and retrieves agent short-term memories and lessons |
+| `memory-summarizer.ts` | Summarizes completed tasks into project-level `ProjectSummary` |
+| `model-config.ts` | Persists and loads per-agent LLM configuration |
+| `project-config.ts` | Project stack configuration helpers |
+| `socket.ts` | Server-Sent Events helper for real-time log streaming |
+| `prisma.ts` | Prisma client singleton |
 
 ---
 
-### 🧠 Agent Memory (Phase 5)
-Agents **remember what they've done** across tasks — no more re-explaining context.
+## API Routes
 
-- **Short-term recall** — last 5 task results injected into every reasoning prompt
-- **Lessons** — manually promote any memory to permanent team knowledge
-- **Project Summary** — rolling AI-condensed context refreshed every 5 tasks
-- **Forget control** — clear an agent's memory from the dashboard in one click
-- Uses cheapest model (DeepSeek default) for summarization — low token cost
-
-```
-## 🧠 What I Remember
-**Project Context:** NestJS + Prisma project with Stripe integration in progress.
-**Recent Work:**
-- [2h ago] Created /payments POST endpoint with Stripe checkout session
-- [30m ago] Fixed auth middleware — Bearer token was missing from header check
-```
-
----
-
-### 🧠 Custom Skills (Phase 4)
-Install expert knowledge directly into any agent's brain from platforms like [SkillsMP.com](https://skillsmp.com).
-
-1. Paste a `SKILL.md` content into the Dashboard → **Skills** tab
-2. Assign it to a specific agent (`devops`, `backend`, `qa`, `ux`) or **all agents**
-3. Set priority (Normal / High / Critical)
-4. The skill is **injected into the agent's system prompt** on every single task — forever
-
-```
-[Skill: Kubernetes Expert] → injected into DevOps prompt
-[Skill: TDD Master]        → injected into QA prompt
-[Skill: WCAG Specialist]   → injected into UX prompt
-[Skill: SQL Optimizer]     → injected into Backend prompt
-```
-
-Skills are stored in the database, toggled on/off in real-time, no server restart needed.
+| Route | Method | Description |
+|---|---|---|
+| `/api/execute` | `POST` | Submit a user request → runs agent pipeline, streams logs via SSE |
+| `/api/tasks` | `GET` | List all tasks (with status, results, logs) |
+| `/api/agents` | `GET` | List all agents with status / config |
+| `/api/agents/[id]` | `PATCH` | Update agent model/provider/API key |
+| `/api/agents/[id]/logs` | `GET` | Stream real-time logs for an agent |
+| `/api/skills` | `GET/POST` | List / create agent skills |
+| `/api/skills/[id]` | `PATCH/DELETE` | Toggle active, update, or delete a skill |
+| `/api/skills/preview` | `POST` | Build system prompt + optional real LLM test for a skill |
+| `/api/projects` | `GET/POST` | List / create projects |
+| `/api/projects/[id]` | `GET/PATCH/DELETE` | Get / update / delete a project + its stack |
+| `/api/memories` | `GET/POST/DELETE` | Agent memory management |
+| `/api/vps` | `GET` | List VPS servers |
 
 ---
 
-### 📊 Real-Time Dashboard
-Dark cyberpunk command center with four tabs:
+## Database Schema
 
-- **👥 Team** — Live status of all 6 agents, model switcher per agent, stack stack badges
-- **📋 Tasks** — Task history, status tracking (`THINKING → EXECUTING → SUCCESS`)
-- **📡 Logs** — Real-time agent reasoning stream (what they're actually thinking)
-- **🧠 Skills** — Skill library management with paste form, toggle, and delete
+Managed via Prisma → Supabase (PostgreSQL). Apply schema with `manual_migration.sql`.
 
-Switch AI model per agent at runtime: **Claude, Gemini, GPT-4o, DeepSeek, Ollama**
+```
+VPS                Agent               Project
+├─ id              ├─ id               ├─ id
+├─ name            ├─ name             ├─ name
+├─ ip/port         ├─ type (enum)      ├─ description
+├─ status (enum)   ├─ status (enum)    ├─ stack (JSONB)
+└─ region          └─ config (JSONB)   └─ updatedAt
+                        └─ provider/model/apiKey
 
----
-
-### 🏗️ Multi-Model Support
-```typescript
-// Each agent can run a different AI provider
-DevOps Agent    → Claude 3.5 Sonnet (complex reasoning)
-Backend Agent   → Gemini 2.0 Flash (fast code generation)
-QA Agent        → DeepSeek Coder (specialized)
-UX Agent        → GPT-4o (design reasoning)
-Orchestrator    → Ollama/Llama3 (local, fast routing)
+Task               AgentSkill          AgentMemory
+├─ id              ├─ id               ├─ id
+├─ userRequest     ├─ name             ├─ agentRole
+├─ status (enum)   ├─ content          ├─ memoryType (enum)
+├─ assignedRole    ├─ agentRole        ├─ content
+├─ results[]       ├─ priority         ├─ projectId
+└─ projectId       ├─ isActive         └─ importance
+                   ├─ stackTriggers    
+                   └─ sourceUrl        ProjectSummary
+                                       ├─ projectId (unique)
+SubTask                                ├─ content
+├─ taskId                              └─ taskCount
+├─ agentRole
+├─ status
+└─ results[]
 ```
 
 ---
 
-## 🚀 Quick Start
+## Feature Map
+
+### ✅ Implemented
+
+| Feature | Status | Notes |
+|---|---|---|
+| Multi-agent task routing | ✅ Done | Orchestrator fan-out to role agents |
+| Per-agent LLM config | ✅ Done | Provider + model + API key per agent, DB-persisted |
+| Multi-provider LLM router | ✅ Done | Claude, Gemini, DeepSeek, GPT-4o, Ollama |
+| Real-time log streaming | ✅ Done | SSE from `/api/agents/[id]/logs` |
+| Project + Stack config | ✅ Done | 6 categories: frontend/backend/database/testing/deploy/mobile |
+| Stack-aware prompt injection | ✅ Done | Expert snippets from stack-library injected per project |
+| Agent Skill system | ✅ Done | Install custom SKILL.md files from marketplace |
+| Stack-aware skill activation | ✅ Done | `stackTriggers` JSONB — OR-logic, auto-enables per stack |
+| Skill test/preview modal | ✅ Done | Prompt-only (free) or real LLM call mode |
+| Companion file merging | ✅ Done | Auto-detect `.md` refs, paste slots, merged on save |
+| Agent short-term memory | ✅ Done | Per-role memories stored and injected into prompts |
+| Project summary memory | ✅ Done | Auto-summarized after each task |
+| Multi-file code output | ✅ Done | `=== FILE: path ===` format + FileTreeView UI + ZIP download |
+| Project Wizard | ✅ Done | Guided stack selection with presets |
+| Dashboard tabs | ✅ Done | Team / Tasks / Logs / Skills / Projects |
+
+---
+
+## Full Request Flow
+
+```
+User types task in Dashboard
+        │
+        ▼
+POST /api/execute
+        │
+        ├─ Load active project + stack (from DB)
+        ├─ Retrieve agent short-term memories
+        ├─ Build system prompt:
+        │     role intro → stack snippets → general rules
+        │     → skills (stack-filtered) → memory context
+        │
+        ▼
+OrchestratorAgent.execute()
+        │
+        ├─ Step 1: PLAN  →  LLM call → JSON plan [{step, action, role}]
+        ├─ Step 2-N: ROUTE each step to the correct agent
+        │     └─ BackendAgent / DevOpsAgent / QAAgent / UXAgent / SecurityAgent
+        │           ├─ Agent loads its own system prompt (role-specific)
+        │           ├─ Calls LLM (tool-use or generation)
+        │           ├─ If tool call: execute tool (e.g. write file, run command)
+        │           ├─ If generation: produce deliverable (code/html/config)
+        │           └─ Logs every step via SSE → Dashboard real-time log panel
+        │
+        ▼
+Task saved to DB (Task + SubTask rows)
+Results saved to Task.results[]
+        │
+        ▼
+memory-summarizer: appends to ProjectSummary
+        │
+        ▼
+Dashboard receives result:
+  - Single file → code viewer with syntax highlight + copy/download
+  - Multi-file  → FileTreeView: per-file viewer + download ZIP
+```
+
+---
+
+## Skill System
+
+Skills are custom expert instruction files (`.md`) installed into the platform.
+
+### Skill Activation Logic
+
+```
+Skill has stackTriggers?
+  No  → Always injected (global skill)
+  Yes → Injected only if ANY trigger key matches the active project stack (OR logic)
+        e.g. { "frontend": "Bootstrap" } activates only for Bootstrap projects
+```
+
+### Skill Test Modal
+
+Two modes in the 🧪 Test button:
+
+| Mode | Cost | What it does |
+|---|---|---|
+| **📋 Prompt only** (default) | Free | Builds full system prompt with skill injected, shows result |
+| **🤖 Real LLM call** | Token cost | Sends built prompt + test message to configured LLM |
+
+### Companion Files
+
+Skills may reference other `.md` files (table of dependencies). When you paste a skill, the form auto-detects all referenced `.md` filenames and shows paste slots. Contents are merged at save time with `<!-- companion: filename.md -->` markers.
+
+---
+
+## Agent Memory System
+
+```
+Short-term memory (AgentMemory table)
+  - Stored after each task: key observations, decisions made
+  - Type: SHORT_TERM (task facts) | LESSON (reusable patterns)
+  - Injected into next task's system prompt for the same agent+project
+
+Project-level summary (ProjectSummary table)
+  - One row per project, updated after every completed task
+  - Summarizes all prior work so agents have project context
+  - Injected at the top of every prompt when a project is active
+```
+
+---
+
+## Deployment Guide
 
 ### Prerequisites
-- Node.js v20+
-- PostgreSQL database
-- (Optional) SSH access to a VPS
 
-### Setup
+- Node.js 20+
+- PostgreSQL database (Supabase recommended)
+- At least one LLM API key (Gemini, Claude, OpenAI, or DeepSeek)
+
+### 1 — Clone & Install
 
 ```bash
-# 1. Install dependencies
+git clone <repo>
+cd ai-devops-guardian
 npm install
+```
 
-# 2. Set up environment
-cp .env.example .env
-# Fill in DATABASE_URL and at least one AI provider key
+### 2 — Configure Environment
 
-# 3. Init database
+Copy `.env.example` → `.env` and fill in:
+
+```env
+DATABASE_URL="postgresql://..."          # Supabase direct connection (port 5432)
+DIRECT_URL="postgresql://..."           # Same URL for Prisma migrations
+```
+
+> API keys for LLM providers are set **per-agent** in the Dashboard UI and persisted in the `Agent.config` JSONB field — they do NOT go in `.env`.
+
+### 3 — Apply Database Schema
+
+Open **Supabase SQL Editor** → paste the entire contents of:
+
+```
+prisma/manual_migration.sql
+```
+
+This creates all tables with `IF NOT EXISTS` guards — safe to re-run on any fresh or existing database.
+
+> **For existing databases** — the bottom section of `manual_migration.sql` contains `ALTER TABLE … ADD COLUMN IF NOT EXISTS` statements that apply new columns incrementally without data loss.
+
+### 4 — Generate Prisma Client
+
+```bash
 npx prisma generate
-npx prisma db push
+```
 
-# 4. Start
+> If you get `EPERM: operation not permitted` (Windows file lock), stop the dev server first, then re-run.
+
+### 5 — Run Development Server
+
+```bash
 npm run dev
 ```
 
 Open [http://localhost:3000/dashboard](http://localhost:3000/dashboard)
 
----
+### 6 — First-Run Setup in Dashboard
 
-### Environment Variables
+1. **Set API keys** — click each Agent card → configure provider + model + API key
+2. **Create a Project** — click "+ New Project" → choose tech stack preset
+3. **Install Skills** (optional) — Skills tab → paste SKILL.md content
+4. **Submit a task** — type in the task input, click Execute
 
-```env
-DATABASE_URL="postgresql://user:password@localhost:5432/ai_guardian"
-NEXT_PUBLIC_APP_URL="http://localhost:3000"
+### Production Deployment (Vercel)
 
-# At least one AI provider
-ANTHROPIC_API_KEY="sk-ant-..."
-GOOGLE_GENERATIVE_AI_API_KEY="..."
-OPENAI_API_KEY="sk-..."
-DEEPSEEK_API_KEY="..."
-
-# For local models (optional)
-OLLAMA_BASE_URL="http://localhost:11434"
-OLLAMA_MODEL="llama3.1"
+```bash
+# Push to GitHub → connect repo in Vercel
+# Set environment variable in Vercel dashboard:
+DATABASE_URL = "postgresql://..."    # Supabase pooler URL (port 6543, pgbouncer=true)
+DIRECT_URL   = "postgresql://..."    # Supabase direct URL (port 5432)
 ```
 
+Vercel will auto-run `npm run build` on each deploy. No additional steps needed.
+
 ---
 
-## 📁 Project Structure
+## Environment Variables
+
+| Variable | Required | Description |
+|---|---|---|
+| `DATABASE_URL` | ✅ | PostgreSQL connection string (Supabase pooler for production) |
+| `DIRECT_URL` | ✅ | Direct PostgreSQL URL (used by Prisma for migrations) |
+
+> All LLM API keys (Gemini, Claude, OpenAI, DeepSeek) are stored **in the database** per agent — not in environment variables.
+
+---
+
+## Next Phase Roadmap
+
+### Phase 6 — Enhanced Execution (Next)
+
+| Feature | Priority | Description |
+|---|---|---|
+| **Real SSH / VPS execution** | 🔴 High | Actually run generated shell commands on connected VPS via SSH |
+| **Agent approval gates** | 🔴 High | High-risk commands require user confirmation before execution |
+| **File system write tool** | 🟡 Medium | Agents write generated files directly to a project directory on VPS |
+| **Git integration tool** | 🟡 Medium | Auto-commit / push / create PR after task completes |
+
+### Phase 7 — Skill Marketplace
+
+| Feature | Priority | Description |
+|---|---|---|
+| **Skill discovery/search** | 🟡 Medium | Browse a remote skill registry by role, tag, rating |
+| **One-click skill install** | 🟡 Medium | Install from URL — auto-fetch main skill + companion files |
+| **Skill versioning** | 🟢 Low | Track skill version, show upgrade available badge |
+| **Skill sharing** | 🟢 Low | Export local skill as shareable URL |
+
+### Phase 8 — Multi-Project & Team
+
+| Feature | Priority | Description |
+|---|---|---|
+| **Authentication (NextAuth)** | 🔴 High | User accounts, session management |
+| **Team workspaces** | 🟡 Medium | Multiple users sharing projects + skills |
+| **Role-based access control** | 🟡 Medium | Restrict which agents/tools each user can access |
+| **Audit log** | 🟢 Low | Full history of who ran what task and when |
+
+### Phase 9 — Observability
+
+| Feature | Priority | Description |
+|---|---|---|
+| **Token usage dashboard** | 🟡 Medium | Per-agent, per-project token cost tracking |
+| **Task replay** | 🟢 Low | Re-run any past task with the same or updated plan |
+| **A/B agent comparison** | 🟢 Low | Run same task on two agents, compare outputs |
+| **Skill effectiveness metrics** | 🟢 Low | Track agent output quality before/after skill activation |
+
+---
+
+## Project Structure
 
 ```
 ai-devops-guardian/
 ├── prisma/
-│   └── schema.prisma              # 10 models: VPS, Agent, Task, SubTask,
-│                                  #   AgentLog, CommandHistory, Project,
-│                                  #   AgentSkill, AgentMemory, ProjectSummary
+│   ├── schema.prisma          # Prisma data model
+│   └── manual_migration.sql   # Full SQL migration (safe to re-run)
 ├── src/
 │   ├── agents/
-│   │   ├── base.agent.ts          # Abstract base — reason→execute→save memory
-│   │   ├── orchestrator/          # 🧠 Task router & planner
-│   │   ├── devops/                # ⚙️ SSH + Docker specialist
-│   │   ├── backend/               # 🛠️ API + DB specialist
-│   │   ├── qa/                    # 🧪 Testing specialist
-│   │   ├── ux/                    # 🎨 UI/UX specialist
-│   │   └── security/              # 🛡️ Guardian filter (always on)
-│   ├── lib/
-│   │   ├── model-router.ts        # Multi-provider AI abstraction
-│   │   ├── model-config.ts        # Per-agent model config (DB-backed)
-│   │   ├── prompt-builder.ts      # Async stack-aware + skill-injecting prompt builder
-│   │   ├── skill-loader.ts        # Fetches active AgentSkills from DB at prompt time
-│   │   ├── memory-store.ts        # CRUD + formatting for AgentMemory / ProjectSummary
-│   │   ├── memory-summarizer.ts   # AI-powered task→memory condenser
-│   │   ├── stack-library.ts       # 30+ tech options across 6 categories
-│   │   └── project-config.ts      # Project ↔ stack config resolver
-│   ├── tools/
-│   │   └── ssh/                   # SSH execution tool (guarded)
-│   └── app/
-│       ├── api/
-│       │   ├── tasks/             # POST /api/tasks → triggers orchestrator
-│       │   ├── agents/[id]/model  # PATCH → switch AI model per agent
-│       │   ├── projects/          # CRUD for projects with stack config
-│       │   ├── skills/            # CRUD for AgentSkills
-│       │   └── memories/          # CRUD for AgentMemory + bulk clear
-│       └── dashboard/             # The War Room (4-tab cyberpunk UI)
+│   │   ├── base.agent.ts      # BaseAgent: plan → execute → log loop
+│   │   ├── orchestrator/      # OrchestratorAgent: task decomposition
+│   │   ├── devops/            # DevOpsAgent
+│   │   ├── backend/           # BackendAgent
+│   │   ├── qa/                # QAAgent
+│   │   ├── ux/                # UXAgent
+│   │   └── security/          # SecurityAgent
+│   ├── app/
+│   │   ├── api/               # REST API routes
+│   │   │   ├── execute/       # Task submission
+│   │   │   ├── agents/        # Agent CRUD + log streaming
+│   │   │   ├── skills/        # Skill CRUD + preview
+│   │   │   ├── projects/      # Project CRUD
+│   │   │   ├── memories/      # Memory management
+│   │   │   └── tasks/         # Task history
+│   │   └── dashboard/
+│   │       └── page.tsx       # Main dashboard UI (~2100 lines)
+│   └── lib/
+│       ├── model-router.ts    # Multi-provider LLM router
+│       ├── prompt-builder.ts  # Dynamic system prompt composer
+│       ├── skill-loader.ts    # Stack-aware skill fetcher
+│       ├── stack-library.ts   # Per-tech expert prompt snippets
+│       ├── memory-store.ts    # Agent memory CRUD
+│       └── memory-summarizer.ts # Project summary generator
+└── .env.example
 ```
 
 ---
 
-## 🔌 API Reference
-
-### Submit a Task
-```bash
-POST /api/tasks
-{ "userRequest": "Deploy the API to production", "projectId": "proj_..." }
-```
-
-### Manage Skills
-```bash
-GET    /api/skills               # List all skills (filter by ?agentRole=devops)
-POST   /api/skills               # Install new skill
-PATCH  /api/skills/:id           # Toggle active, update priority
-DELETE /api/skills/:id           # Remove skill
-```
-
-### Manage Projects
-```bash
-GET    /api/projects             # List projects
-POST   /api/projects             # Create project with stack config
-PATCH  /api/projects/:id         # Update stack
-```
-
-### Switch Agent Model
-```bash
-PATCH /api/agents/:id/model
-{ "provider": "GEMINI" }       # CLAUDE | GEMINI | GPT4O | DEEPSEEK | OLLAMA
-```
-
----
-
-## 🏛️ Architecture
-
-```
-User Request
-     │
-     ▼
-┌─────────────────────────────────────────────────┐
-│                  Orchestrator                    │
-│  ┌────────────────────────────────────────────┐ │
-│  │ Project Stack + Active Skills → Prompt     │ │
-│  │ Classify → Route → Plan                   │ │
-│  └────────────────────────────────────────────┘ │
-└──┬────────┬──────────────┬──────────┬───────────┘
-   │        │              │          │
-   ▼        ▼              ▼          ▼
-DevOps   Backend          QA         UX
-Agent    Agent           Agent      Agent
-   │        │              │          │
-   │   [Stack Prompt + Injected Skills]
-   │        │              │          │
-   ▼        ▼              ▼          ▼
-┌─────────────────────────────────────────────────┐
-│            🛡️ Security Guardian Filter           │
-│        Validate → Risk Score → Allow/Block       │
-└─────────────────────────────────────────────────┘
-         │
-         ▼
-    SSH / Docker / File System / Test Runner
-```
-
----
-
-## 📈 Roadmap
-
-### ✅ Phase 1 — Foundation
-- Security Guardian filter (4-layer, CRITICAL auto-block)
-- DevOps Agent with SSH + Docker tools
-- Prisma schema, API routes, Dashboard UI
-
-### ✅ Phase 2 — Full Team
-- BaseAgent with reason → plan → execute loop
-- Backend, QA, UX Senior agents
-- Orchestrator with keyword-based task routing
-- Multi-model support (Claude, Gemini, GPT-4o, DeepSeek, Ollama)
-- Real-time Socket.io log streaming
-
-### ✅ Phase 3 — Stack Intelligence
-- 30+ technology options across 6 stack categories
-- Project wizard with stack selection
-- Dynamic stack-aware system prompts per agent
-- Per-agent AI model switching from the dashboard
-
-### ✅ Phase 4 — Custom Skills
-- `AgentSkill` DB model with role targeting and priority
-- Full CRUD API (`/api/skills`)
-- `skill-loader.ts` — DB skills injected at prompt build time
-- Dashboard **🧠 Skills** tab with paste form, toggle, delete
-- Support for [SkillsMP.com](https://skillsmp.com) skill format
-
-### 🔄 Phase 5 — Agent Memory (Active)
-- [x] `AgentMemory` + `ProjectSummary` DB models
-- [x] `memory-store.ts` — CRUD + prompt formatting helpers
-- [x] `memory-summarizer.ts` — AI-powered task→memory condenser (cheap model)
-- [x] `BaseAgent` saves memory after every task, injects into next reasoning prompt
-- [x] `GET/DELETE /api/memories` + bulk clear endpoint
-- [x] Dashboard memory panel on each agent card (expand, forget all)
-- [ ] Approval workflow UI for HIGH-risk tasks
-- [ ] Agent-to-agent communication (Backend ↔ QA handoff)
-- [ ] GitHub webhook → issue → task auto-routing
-
----
-
-## 🤝 Contributing
-
-PRs welcome. Start by opening an issue to discuss what you'd like to add.
-
----
-
-## 📄 License
-
-MIT — go build something great.
-
----
-
-<div align="center">
-
-**Built with ❤️ & 🛡️ by QuocAnhPC**
-
-*Phase 5 Active — 6 agents, 30+ stacks, unlimited skills, persistent memory, zero `rm -rf /`*
-
-</div>
+*Last updated: 2026-02-25 — Phase 5 complete (Skills, Memory, Multi-file output, Skill Test Modal, Companion Files)*
