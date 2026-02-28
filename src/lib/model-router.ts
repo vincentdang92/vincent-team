@@ -133,6 +133,80 @@ export async function callModel(
     }
 }
 
+// ── Per-provider safe max output tokens ───────────────────────────────────────
+// These are the hard limits each provider enforces on output tokens.
+export const PROVIDER_MAX_TOKENS: Record<ModelProvider, number> = {
+    [ModelProvider.GEMINI]: 8192,    // Gemini 2.0 Flash hard limit
+    [ModelProvider.CLAUDE]: 8096,    // Claude 3.5 limit
+    [ModelProvider.DEEPSEEK]: 8000,  // DeepSeek safe ceiling
+    [ModelProvider.GPT4O]: 16384,    // GPT-4o supports up to 16,384
+    [ModelProvider.OLLAMA]: 8000,    // Conservative for local models
+};
+
+/**
+ * Detects if a generated text block appears truncated.
+ * Heuristics: code/HTML that doesn't end with a proper closing element.
+ */
+function looksLikeTruncated(text: string): boolean {
+    const trimmed = text.trimEnd();
+    if (!trimmed) return false;
+    // HTML: should end with </html> or </body>
+    if (trimmed.includes('<!DOCTYPE') || trimmed.includes('<html')) {
+        return !/((<\/html>|<\/body>)\s*)$/i.test(trimmed);
+    }
+    // CSS: should end with a closing brace
+    if (trimmed.includes('{') && !trimmed.includes('<')) {
+        return !trimmed.endsWith('}');
+    }
+    // JSON: should end with } or ]
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+        return !(/[}\]]\s*$/.test(trimmed));
+    }
+    return false;
+}
+
+/**
+ * callModelWithContinuation — calls the model and, if the output looks truncated,
+ * makes follow-up "continue" calls (up to maxRounds) until the output is complete
+ * or the provider returns a naturally finished response.
+ */
+export async function callModelWithContinuation(
+    config: ModelConfig,
+    messages: ChatMessage[],
+    maxRounds = 3,
+): Promise<ModelResponse> {
+    // Clamp to provider max if not set or exceeds it
+    const providerMax = PROVIDER_MAX_TOKENS[config.provider] ?? 8000;
+    const clampedConfig: ModelConfig = {
+        ...config,
+        maxTokens: Math.min(config.maxTokens ?? providerMax, providerMax),
+    };
+
+    // First call
+    let response = await callModel(clampedConfig, messages);
+    let fullContent = response.content;
+
+    // Continuation loop
+    const conversationMessages: ChatMessage[] = [...messages];
+    let round = 0;
+    while (round < maxRounds && looksLikeTruncated(fullContent)) {
+        round++;
+        // Add the assistant's partial response + a user continuation prompt
+        conversationMessages.push({ role: 'assistant', content: fullContent });
+        conversationMessages.push({
+            role: 'user',
+            content: 'Continue EXACTLY from where you left off. Output only the continuation — no repetition, no preamble.',
+        });
+
+        const continuation = await callModel(clampedConfig, conversationMessages);
+        fullContent += continuation.content;
+        response = { ...continuation, content: fullContent };
+    }
+
+    return { ...response, content: fullContent };
+}
+
+
 // ── Claude ────────────────────────────────────────────────────────────────────
 async function callClaude(
     config: ModelConfig,

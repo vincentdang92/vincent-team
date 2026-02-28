@@ -1,0 +1,74 @@
+# 📋 AI DevOps Guardian — Progress Log
+# Format: [YYYY-MM-DD HH:MM +TZ] | STATUS | Task | Notes
+# ─────────────────────────────────────────────────────────────────────────────
+
+[2026-02-28 19:13 +07] | ✅ DONE | System Audit (Phase 5 complete)
+  → Audited: model-router.ts, base.agent.ts, prompt-builder.ts, memory-store.ts,
+    skill-loader.ts, security/filters.ts, Prisma schema, API routes, .env
+  → Report: .gemini/antigravity/brain/b8ea6b1a-7f33-4844-b207-26ccd611149d/system_audit.md
+  → Key findings:
+     🔴 CRITICAL: No auth on any API route
+     🔴 CRITICAL: LLM API keys stored in plain JSON in DB
+     🔴 CRITICAL: GuardianFilter not wired to /api/execute
+     🟠 HIGH: /api/execute only routes to DevOpsAgent (not orchestrator)
+     🟠 HIGH: No Zod validation on request bodies
+     🟡 MEDIUM: No CI/CD, no Dockerfile, no health check endpoint
+     🟡 MEDIUM: dashboard/page.tsx ~2100 lines — needs refactoring
+     🟡 MEDIUM: AgentLog table has no retention policy
+
+# ─── NEXT SESSION: Start by reading this file ───────────────────────────────
+# COMMAND: cat progress.log
+# ─────────────────────────────────────────────────────────────────────────────
+
+[2026-02-28 19:30 +07] | ✅ DONE | Show Execution Flow Before Running Task
+  → Added: planOnly() method to OrchestratorAgent (classify + reason only, no execute)
+  → Created: src/app/api/tasks/plan/route.ts (POST /api/tasks/plan)
+  → Modified: src/app/dashboard/page.tsx
+     - New state: isPreviewing, pendingPlan
+     - 2-phase submit: handlePreviewPlan → PlanPreviewModal → handleConfirmRun
+     - New PlanPreviewModal component (animated, shows role/risk/steps)
+     - Button changed: "Run" → "▶ Preview Plan"
+  → TSC: 0 errors
+
+[2026-02-28 19:35 +07] | ✅ DONE | Fix file-write tool — returns content not path
+  → Root cause: file-write tool returned "Written /abs/path" → stored in Task.results[]
+    instead of the actual file content → dashboard showed a path, not downloadable HTML
+  → Fixed: ux.agent.ts + backend.agent.ts — tool now returns "=== FILE: path ===\n<content>"
+    (disk write kept as best-effort side-effect)
+  → Result: Task results now contain full file content → dashboard FileTreeView + download works
+
+[2026-02-28 19:44 +07] | ✅ DONE | Fix UX Agent HTML output (directory listing bug)
+  → Root cause: UX agent planned list-dir (step 1) + file-write (step 2) as tool calls.
+    list-dir result = directory listing went into Task.results[].
+    file-write received undefined content from plan JSON args → wrote nothing useful.
+  → Fix: rewrote ux.agent.ts with ZERO tools.
+    No tools → BaseAgent uses no-tool generation path → LLM outputs full HTML with maxTokens:16384
+    → stored directly in Task.results[] → dashboard renders + download button works.
+  → Added strict output-format rules to system prompt (=== FILE: path === format, no truncation)
+  → TSC: 0 errors
+
+[2026-02-28 19:54 +07] | ✅ DONE | Fix UX Agent direct generation ([Reasoning] fallback bug)
+  → Root cause: UX agent LLM planning step produced 2 "no-tool" steps; callModel() threw
+    for both → BaseAgent catch fallback stored "[Reasoning] ..." instead of HTML
+  → Fix 1: ux.agent.ts overrides reason() with hardcoded single-step plan
+    → skips planning LLM call entirely → one direct generation call → full HTML result
+  → Fix 2: base.agent.ts catch block now logs full error stack (visible in Logs tab)
+  → Fix 3: ux.agent.ts system prompt has strict OUTPUT FORMAT rules (raw HTML, no fences)
+  → TSC: 0 errors
+
+[2026-02-28 20:06 +07] | ✅ DONE | Fix generation failure — maxTokens exceeded Gemini limit
+  → Root cause (from DB logs): '400 Invalid max_tokens value, the valid range is [1, 8192]'
+    base.agent.ts was setting maxTokens: Math.max(0, 16384) = 16384 but Gemini max = 8192
+  → Fix: Math.min(Math.max(config.maxTokens ?? 0, 4096), 8000) — safe for all providers
+  → Also: improved error logging in catch block (shows full stack in Logs tab)
+  → TSC: 0 errors
+
+[2026-02-28 20:26 +07] | ✅ DONE | Fix truncated HTML generation with continuation calls
+  → Added: callModelWithContinuation() to model-router.ts
+     - Detects truncated output via looksLikeTruncated() (HTML missing </html>, CSS missing })
+     - Makes up to 3 follow-up "continue where you left off" calls
+     - Stitches segments together into a single complete response
+  → Added: PROVIDER_MAX_TOKENS map (Gemini=8192, GPT-4o=16384, Claude=8096)
+  → Updated: base.agent.ts no-tool path now uses callModelWithContinuation()
+     with provider-specific max as ceiling
+  → TSC: 0 errors

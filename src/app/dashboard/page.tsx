@@ -33,6 +33,19 @@ interface AgentInfo {
     capabilities: string[];
 }
 
+interface AgentPlan {
+    taskSummary: string;
+    riskLevel: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+    requiresApproval: boolean;
+    steps: Array<{ stepNumber: number; action: string; reasoning: string; tool?: string }>;
+}
+
+interface PendingPlan {
+    userRequest: string;
+    assignedRole: string;
+    plan: AgentPlan;
+}
+
 interface Task {
     id: string;
     userRequest: string;
@@ -236,6 +249,8 @@ export default function DashboardPage() {
     const [skills, setSkills] = useState<AgentSkill[]>([]);
     const [taskInput, setTaskInput] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [isPreviewing, setIsPreviewing] = useState(false);
+    const [pendingPlan, setPendingPlan] = useState<PendingPlan | null>(null);
     const [activeTab, setActiveTab] = useState<'team' | 'tasks' | 'logs' | 'skills' | 'projects'>('team');
     const [showProjectWizard, setShowProjectWizard] = useState(false);
     // memories: keyed by agentRole
@@ -375,11 +390,34 @@ export default function DashboardPage() {
         }]);
     }, []);
 
-    const handleSubmitTask = async () => {
-        if (!taskInput.trim() || isSubmitting) return;
-        setIsSubmitting(true);
+    /** Phase 1 — Preview: fetch plan from orchestrator, show modal */
+    const handlePreviewPlan = async () => {
+        if (!taskInput.trim() || isSubmitting || isPreviewing) return;
+        setIsPreviewing(true);
         const req = taskInput;
+        try {
+            const res = await fetch('/api/tasks/plan', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ userRequest: req, projectId: activeProject?.id }),
+            });
+            const data = await res.json();
+            if (data.plan) {
+                setPendingPlan({ userRequest: req, assignedRole: data.assignedRole, plan: data.plan });
+            } else {
+                addLog('orchestrator', `❌ Plan preview failed: ${data.error ?? 'Unknown error'}`, 'ERROR');
+            }
+        } catch { addLog('orchestrator', '❌ Failed to fetch plan', 'ERROR'); }
+        finally { setIsPreviewing(false); }
+    };
+
+    /** Phase 2 — Confirm: actually submit and execute the task */
+    const handleConfirmRun = async () => {
+        if (!pendingPlan || isSubmitting) return;
+        const req = pendingPlan.userRequest;
+        setPendingPlan(null);
         setTaskInput('');
+        setIsSubmitting(true);
         try {
             const res = await fetch('/api/tasks', {
                 method: 'POST',
@@ -393,11 +431,14 @@ export default function DashboardPage() {
                     results: [], createdAt: new Date().toISOString(), projectId: activeProject?.id
                 }, ...prev]);
                 setActiveTab('tasks');
-                addLog('orchestrator', `🎯 Task submitted${activeProject ? ` in [${activeProject.name}]` : ''}: ${req.slice(0, 60)}…`);
+                addLog('orchestrator', `🎯 Task started${activeProject ? ` in [${activeProject.name}]` : ''}: ${req.slice(0, 60)}…`);
             }
         } catch { addLog('orchestrator', '❌ Failed to submit task', 'ERROR'); }
         finally { setIsSubmitting(false); }
     };
+
+    // Keep legacy name so existing onKeyDown binding works
+    const handleSubmitTask = handlePreviewPlan;
 
     const handleModelSwitch = async (
         agentId: string,
@@ -644,11 +685,11 @@ export default function DashboardPage() {
                         <motion.button
                             id="submit-task-btn"
                             whileTap={{ scale: 0.96 }}
-                            onClick={handleSubmitTask}
-                            disabled={isSubmitting || !taskInput.trim()}
-                            className="bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 text-white px-5 py-2.5 rounded-lg text-sm font-semibold transition-colors"
+                            onClick={handlePreviewPlan}
+                            disabled={isPreviewing || isSubmitting || !taskInput.trim()}
+                            className="bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 text-white px-5 py-2.5 rounded-lg text-sm font-semibold transition-colors whitespace-nowrap"
                         >
-                            {isSubmitting ? '⟳' : '▶'} {isSubmitting ? 'Routing…' : 'Run'}
+                            {isPreviewing ? '⟳ Planning…' : isSubmitting ? '⟳ Running…' : '▶ Preview Plan'}
                         </motion.button>
                     </div>
                     {!activeProject && (
@@ -1154,6 +1195,15 @@ export default function DashboardPage() {
                     />
                 )}
             </AnimatePresence>
+
+            {/* ── Plan Preview Modal ── */}
+            {pendingPlan && (
+                <PlanPreviewModal
+                    pending={pendingPlan}
+                    onConfirm={handleConfirmRun}
+                    onCancel={() => { setPendingPlan(null); setTaskInput(pendingPlan.userRequest); }}
+                />
+            )}
 
             {/* ── Skill Test Modal ── */}
             <AnimatePresence>
@@ -2139,6 +2189,123 @@ function TaskCard({ task, projectName }: { task: Task; projectName?: string }) {
             )}
             <p className="text-xs text-gray-700">{new Date(task.createdAt).toLocaleString()}</p>
         </div>
+    );
+}
+
+// ── Plan Preview Modal ──────────────────────────────────────────────────────
+const RISK_BADGE: Record<string, string> = {
+    LOW: 'bg-green-900/60 text-green-400 border border-green-700/40',
+    MEDIUM: 'bg-yellow-900/60 text-yellow-400 border border-yellow-700/40',
+    HIGH: 'bg-orange-900/60 text-orange-400 border border-orange-700/40',
+    CRITICAL: 'bg-red-900/60 text-red-400 border border-red-700/40',
+};
+
+function PlanPreviewModal({
+    pending,
+    onConfirm,
+    onCancel,
+}: {
+    pending: PendingPlan;
+    onConfirm: () => void;
+    onCancel: () => void;
+}) {
+    const role = pending.assignedRole as AgentRole;
+    const roleColor = ROLE_COLORS[role] ?? ROLE_COLORS.backend;
+    const roleIcon = ROLE_ICONS[role] ?? '🤖';
+    const { plan } = pending;
+
+    return (
+        <AnimatePresence>
+            {/* Backdrop */}
+            <motion.div
+                key="backdrop"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+                onClick={onCancel}
+            >
+                {/* Panel */}
+                <motion.div
+                    key="panel"
+                    initial={{ opacity: 0, scale: 0.95, y: 16 }}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.95, y: 16 }}
+                    transition={{ duration: 0.2 }}
+                    className="w-full max-w-xl bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl overflow-hidden"
+                    onClick={e => e.stopPropagation()}
+                >
+                    {/* Header */}
+                    <div className="bg-gray-800/80 px-5 py-4 border-b border-gray-700 flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                            <span className="text-lg">{roleIcon}</span>
+                            <div>
+                                <h3 className="text-sm font-semibold text-white">Execution Plan</h3>
+                                <p className="text-xs text-gray-500 mt-0.5 max-w-xs truncate">{pending.userRequest}</p>
+                            </div>
+                        </div>
+                        <button onClick={onCancel} className="text-gray-600 hover:text-gray-300 transition-colors text-lg leading-none">✕</button>
+                    </div>
+
+                    {/* Meta row */}
+                    <div className="px-5 pt-4 flex items-center gap-3 flex-wrap">
+                        <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${roleColor.bg} ${roleColor.text} border ${roleColor.border}`}>
+                            {roleIcon} {role.toUpperCase()} Agent
+                        </span>
+                        <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${RISK_BADGE[plan.riskLevel] ?? RISK_BADGE.LOW}`}>
+                            {plan.riskLevel} Risk
+                        </span>
+                        {plan.requiresApproval && (
+                            <span className="text-xs px-2.5 py-1 rounded-full bg-orange-900/60 text-orange-400 border border-orange-700/40">
+                                ⚠️ Approval required
+                            </span>
+                        )}
+                    </div>
+
+                    {/* Summary */}
+                    {plan.taskSummary && (
+                        <p className="px-5 pt-3 text-xs text-gray-400 leading-relaxed">{plan.taskSummary}</p>
+                    )}
+
+                    {/* Steps */}
+                    <div className="px-5 pt-3 pb-2 max-h-64 overflow-y-auto space-y-2">
+                        {plan.steps.map((step, i) => (
+                            <div key={i} className="flex gap-3 p-2.5 bg-gray-800/50 rounded-lg border border-gray-700/40">
+                                <span className="flex-shrink-0 w-6 h-6 rounded-full bg-cyan-900/60 border border-cyan-700/40 text-cyan-400 text-xs flex items-center justify-center font-mono">
+                                    {step.stepNumber}
+                                </span>
+                                <div className="min-w-0">
+                                    <p className="text-xs text-white font-medium leading-snug">{step.action}</p>
+                                    {step.tool && (
+                                        <span className="text-[10px] text-cyan-600 font-mono">tool: {step.tool}</span>
+                                    )}
+                                    {step.reasoning && (
+                                        <p className="text-[11px] text-gray-500 mt-0.5 leading-relaxed">{step.reasoning}</p>
+                                    )}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+
+                    {/* Actions */}
+                    <div className="px-5 py-4 border-t border-gray-700/60 flex gap-3 justify-end">
+                        <button
+                            onClick={onCancel}
+                            className="px-4 py-2 text-sm text-gray-400 hover:text-white bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors"
+                        >
+                            Cancel
+                        </button>
+                        <motion.button
+                            whileTap={{ scale: 0.97 }}
+                            onClick={onConfirm}
+                            className="px-5 py-2 text-sm font-semibold text-white bg-cyan-600 hover:bg-cyan-500 rounded-lg transition-colors"
+                        >
+                            ▶ Confirm &amp; Run
+                        </motion.button>
+                    </div>
+                </motion.div>
+            </motion.div>
+        </AnimatePresence>
     );
 }
 

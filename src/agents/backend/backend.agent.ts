@@ -16,11 +16,16 @@ const fileWriteTool: AgentTool = {
     async execute(args: Record<string, unknown>) {
         const { filePath, content } = args as { filePath: string; content: string };
         const resolved = path.resolve(process.cwd(), filePath);
-        await fs.mkdir(path.dirname(resolved), { recursive: true });
-        await fs.writeFile(resolved, content, 'utf-8');
-        return `Written ${resolved}`;
+        // Write to disk as a best-effort side-effect
+        try {
+            await fs.mkdir(path.dirname(resolved), { recursive: true });
+            await fs.writeFile(resolved, content, 'utf-8');
+        } catch { /* ignore — result is always the content */ }
+        // Return content so it lands in Task.results[] and is downloadable in dashboard
+        return `=== FILE: ${filePath} ===\n${content}`;
     },
 };
+
 
 const fileReadTool: AgentTool = {
     name: 'file-read',

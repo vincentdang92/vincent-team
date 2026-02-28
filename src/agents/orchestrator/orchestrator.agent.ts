@@ -119,6 +119,33 @@ Always route to the most specific role. When in doubt, prefer backend.`);
         }
     }
 
+    /**
+     * planOnly — classify + reason only, NO execution, NO DB writes.
+     * Used by /api/tasks/plan to show the user the plan before committing.
+     */
+    async planOnly(context: OrchestratorContext): Promise<{
+        assignedRole: string;
+        plan: AgentPlan;
+    }> {
+        if (!this.agentId) await this.initialize();
+
+        // Resolve stack from projectId or use directly supplied stack
+        let stack: StackConfig = context.stack ?? {};
+        if (context.projectId && !context.stack) {
+            const project = await getProjectConfig(context.projectId);
+            if (project) stack = project.stack;
+        }
+
+        const role = this.classifyTask(context.userRequest, stack);
+        const agent = this.buildRoleAgent(role, stack);
+        await agent.initialize();
+
+        // reason() only — no execute(), no DB task record
+        const plan = await agent.reason(context);
+
+        return { assignedRole: role, plan };
+    }
+
     /** Dispatch a task to the correct agent, injecting project stack context */
     async dispatch(context: OrchestratorContext): Promise<{
         assignedRole: string;

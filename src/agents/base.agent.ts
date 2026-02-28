@@ -183,17 +183,19 @@ export abstract class BaseAgent {
                             ].filter(Boolean).join('\n'),
                         },
                     ];
-                    const { callModel } = await import('@/lib/model-router');
-                    // Use a high token limit for generation — full HTML pages can be 6000-12000 tokens
-                    const genConfig = { ...config, maxTokens: Math.max(config.maxTokens ?? 0, 16384) };
-                    const response = await callModel(genConfig, generateMessages);
+                    const { callModelWithContinuation, PROVIDER_MAX_TOKENS } = await import('@/lib/model-router');
+                    // Use provider's hard max — continuation calls auto-stitch if output is truncated
+                    const providerMax = PROVIDER_MAX_TOKENS[config.provider] ?? 8000;
+                    const genConfig = { ...config, maxTokens: providerMax };
+                    const response = await callModelWithContinuation(genConfig, generateMessages, 3);
                     const generated = response.content;
                     await this.log(LogType.SUCCESS, `✅ Step ${step.stepNumber} generated: ${generated.slice(0, 120)}…`);
                     results.push(generated);
                 } catch (genErr) {
                     // Fallback: emit reasoning so at least something is saved
                     const msg = genErr instanceof Error ? genErr.message : String(genErr);
-                    await this.log(LogType.WARN as never, `⚠️ Step ${step.stepNumber} generation failed (${msg}) — using reasoning`);
+                    const stack = genErr instanceof Error ? (genErr.stack ?? '') : '';
+                    await this.log(LogType.ERROR, `❌ Step ${step.stepNumber} generation FAILED: ${msg}\n${stack.slice(0, 400)}`);
                     results.push(`[Reasoning] ${step.reasoning}`);
                 }
             }

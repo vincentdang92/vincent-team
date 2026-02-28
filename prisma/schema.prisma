@@ -11,6 +11,79 @@ datasource db {
 }
 
 // ============================================
+// AUTH & BILLING
+// ============================================
+
+enum UserRole {
+  ADMIN
+  CUSTOMER
+}
+
+model Plan {
+  id              String   @id @default(cuid())
+  name            String   @unique  // "starter" | "pro" | "team"
+  displayName     String
+  priceUsd        Int                // cents: 0, 2900, 9900
+  creditsPerCycle Int
+  maxProjects     Int                // -1 = unlimited
+  allowedAgents   String[]           // e.g. ["ux","backend"] or ["*"]
+  rolloverMonths  Int      @default(0)
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+
+  users           User[]
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  passwordHash  String
+  name          String?
+  role          UserRole  @default(CUSTOMER)
+
+  // Billing
+  planId        String?
+  plan          Plan?     @relation(fields: [planId], references: [id])
+  creditBalance Int       @default(0)
+
+  // Relations
+  creditTxns    CreditTxn[]
+  sessions      Session[]
+  projects      Project[]
+  tasks         Task[]
+
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([email])
+  @@index([role])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expires      DateTime
+
+  @@index([userId])
+}
+
+model CreditTxn {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  taskId    String?
+  delta     Int      // negative = debit, positive = top-up
+  reason    String   // "task_run" | "plan_topup" | "monthly_reset" | "admin_adjust" | "sepay_payment"
+  meta      Json?    // e.g. { sepayTxnId, tokensUsed }
+  timestamp DateTime @default(now())
+
+  @@index([userId])
+  @@index([timestamp])
+}
+
+// ============================================
 // 1. VPS Management
 // ============================================
 model VPS {
@@ -19,24 +92,21 @@ model VPS {
   ip          String
   port        Int      @default(22)
   username    String
-  sshKeyPath  String?  // Path to SSH private key
+  sshKeyPath  String?
   status      VPSStatus @default(DISCONNECTED)
-  
-  // Metadata
+
   region      String?
-  provider    String?  // AWS, DigitalOcean, etc.
-  tags        String[] // ["production", "staging", etc.]
-  
-  // Timestamps
+  provider    String?
+  tags        String[]
+
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   lastPingAt  DateTime?
-  
-  // Relations
+
   deployments Deployment[]
   agentLogs   AgentLog[]
   commands    CommandHistory[]
-  
+
   @@index([status])
   @@index([ip])
 }
@@ -53,24 +123,21 @@ enum VPSStatus {
 // ============================================
 model Agent {
   id          String   @id @default(cuid())
-  name        String   @unique // "devops", "security", "backend", "frontend", "qa"
+  name        String   @unique
   type        AgentType
   status      AgentStatus @default(IDLE)
-  
-  // Configuration
-  config      Json?    // Agent-specific config
-  capabilities String[] // ["ssh", "docker", "git", etc.]
-  
-  // Timestamps
+
+  config      Json?
+  capabilities String[]
+
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   lastActiveAt DateTime?
-  
-  // Relations
+
   logs        AgentLog[]
   commands    CommandHistory[]
   deployments Deployment[]
-  
+
   @@index([type])
   @@index([status])
 }
@@ -101,15 +168,17 @@ enum ModelProvider {
 }
 
 // ============================================
-// 7. Project System (Stack-Agnostic)
+// 7. Project System
 // ============================================
 model Project {
   id          String   @id @default(cuid())
   name        String
   description String?
-
-  // Stack config: { frontend, backend, database, testing, deploy }
   stack       Json     @default("{}")
+
+  // Owner
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -117,40 +186,40 @@ model Project {
   tasks       Task[]
 
   @@index([createdAt])
+  @@index([userId])
 }
 
 // ============================================
-// 8. Task System (Orchestrator)
+// 8. Task System
 // ============================================
 model Task {
   id            String   @id @default(cuid())
-
-  // User's original request
   userRequest   String
   summary       String?
-
-  // Status tracking
   status        TaskStatus @default(PENDING)
-  assignedRole  String?   // which agent role handled this
+  assignedRole  String?
+  results       String[]
 
-  // Results
-  results       String[]  // output from agent execution
+  // Owner
+  userId        String?
+  user          User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
 
-  // Project context (optional)
+  // Credit cost
+  creditCost    Int      @default(0)
+
   projectId     String?
-  project       Project?  @relation(fields: [projectId], references: [id])
+  project       Project? @relation(fields: [projectId], references: [id])
 
-  // Timestamps
   createdAt     DateTime @default(now())
   startedAt     DateTime?
   completedAt   DateTime?
 
-  // Relations
   subTasks      SubTask[]
 
   @@index([status])
   @@index([createdAt])
   @@index([projectId])
+  @@index([userId])
 }
 
 enum TaskStatus {
@@ -163,37 +232,19 @@ enum TaskStatus {
 }
 
 // ============================================
-// 9. Agent Skills (Custom / SkillsMP)
+// 9. Agent Skills
 // ============================================
 model AgentSkill {
   id          String   @id @default(cuid())
-
-  // Identity
   name        String
   description String?
-
-  // Which agent role this skill applies to
-  // "devops" | "backend" | "qa" | "ux" | "orchestrator" | "security" | "all"
   agentRole   String   @default("all")
-
-  // The skill content (SKILL.md body or custom instructions)
   content     String   @db.Text
-
-  // Source info (optional, for skills from SkillsMP / GitHub)
   sourceUrl   String?
   sourceAuthor String?
-
-  // Stack-aware auto-activation: skill only injects when project stack matches.
-  // Stored as { frontend?, backend?, database?, deploy?, testing?, mobile? }
-  // null / {} = always active for any stack (global).
-  // Any matching key activates the skill (OR logic).
   stackTriggers Json?
-
-  // Control
   isActive    Boolean  @default(true)
-  priority    Int      @default(0) // higher = injected first in prompt
-
-  // Timestamps
+  priority    Int      @default(0)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -202,23 +253,16 @@ model AgentSkill {
 }
 
 // ============================================
-// 10. Agent Memory (Phase 5A)
+// 10. Agent Memory
 // ============================================
 model AgentMemory {
   id          String     @id @default(cuid())
-
-  // Scope
-  agentRole   String     // "devops" | "backend" | "qa" | "ux" | "orchestrator"
-  projectId   String?    // scoped to a project, or global if null
-
-  // Memory content (AI-summarised task result)
+  agentRole   String
+  projectId   String?
   memoryType  MemoryType @default(SHORT_TERM)
   content     String     @db.Text
-  taskId      String?    // source task reference (optional)
-
-  // Relevance weighting
-  importance  Int        @default(0) // 0=normal, 50=high, 100=critical
-
+  taskId      String?
+  importance  Int        @default(0)
   createdAt   DateTime   @default(now())
 
   @@index([agentRole])
@@ -228,15 +272,14 @@ model AgentMemory {
 }
 
 enum MemoryType {
-  SHORT_TERM  // recent task results — auto-rotate after 30 entries
-  LESSON      // manually promoted permanent learnings
+  SHORT_TERM
+  LESSON
 }
 
-// Rolling AI-condensed summary of a project's history
 model ProjectSummary {
   id          String   @id @default(cuid())
   projectId   String   @unique
-  content     String   @db.Text  // 3-5 sentence rolling summary
+  content     String   @db.Text
   taskCount   Int      @default(0)
   updatedAt   DateTime @updatedAt
   createdAt   DateTime @default(now())
@@ -246,18 +289,15 @@ model ProjectSummary {
 
 model SubTask {
   id          String   @id @default(cuid())
-  
   taskId      String
   task        Task     @relation(fields: [taskId], references: [id])
-  
-  agentRole   String   // "devops" | "backend" | "qa" | "ux"
+  agentRole   String
   description String
   status      TaskStatus @default(PENDING)
   results     String[]
-  
   createdAt   DateTime @default(now())
   completedAt DateTime?
-  
+
   @@index([taskId])
   @@index([agentRole])
 }
@@ -267,37 +307,27 @@ model SubTask {
 // ============================================
 model CommandHistory {
   id          String   @id @default(cuid())
-  
-  // Command Details
   command     String
-  rawInput    String?  // Original user input
-  sanitized   String?  // After security filter
-  
-  // Security
+  rawInput    String?
+  sanitized   String?
   isBlocked   Boolean  @default(false)
-  blockReason String?  // Why it was blocked
+  blockReason String?
   riskLevel   RiskLevel @default(LOW)
-  
-  // Execution
   status      CommandStatus @default(PENDING)
   exitCode    Int?
   stdout      String?
   stderr      String?
-  duration    Int?     // milliseconds
-  
-  // Context
+  duration    Int?
   agent       Agent    @relation(fields: [agentId], references: [id])
   agentId     String
   vps         VPS?     @relation(fields: [vpsId], references: [id])
   vpsId       String?
   deployment  Deployment? @relation(fields: [deploymentId], references: [id])
   deploymentId String?
-  
-  // Timestamps
   createdAt   DateTime @default(now())
   executedAt  DateTime?
   completedAt DateTime?
-  
+
   @@index([agentId])
   @@index([vpsId])
   @@index([status])
@@ -323,29 +353,21 @@ enum RiskLevel {
 }
 
 // ============================================
-// 4. Agent Logs (Real-time Stream)
+// 4. Agent Logs
 // ============================================
 model AgentLog {
   id          String   @id @default(cuid())
-  
-  // Log Details
   message     String
   type        LogType  @default(INFO)
   level       LogLevel @default(INFO)
-  
-  // Context
   agent       Agent    @relation(fields: [agentId], references: [id])
   agentId     String
   vps         VPS?     @relation(fields: [vpsId], references: [id])
   vpsId       String?
-  
-  // Metadata
-  metadata    Json?    // Additional context
-  tags        String[] // ["reasoning", "execution", "error", etc.]
-  
-  // Timestamps
+  metadata    Json?
+  tags        String[]
   timestamp   DateTime @default(now())
-  
+
   @@index([agentId])
   @@index([vpsId])
   @@index([type])
@@ -357,9 +379,9 @@ enum LogType {
   WARN
   ERROR
   SUCCESS
-  REASONING  // Agent's thought process
-  EXECUTION  // Command execution
-  SECURITY   // Security alerts
+  REASONING
+  EXECUTION
+  SECURITY
 }
 
 enum LogLevel {
@@ -375,33 +397,23 @@ enum LogLevel {
 // ============================================
 model Deployment {
   id          String   @id @default(cuid())
-  
-  // Project Details
   projectName String
   repository  String?
   branch      String?
   commitHash  String?
-  
-  // Status
   status      DeploymentStatus @default(PENDING)
-  progress    Int      @default(0) // 0-100
-  
-  // Context
+  progress    Int      @default(0)
   agent       Agent    @relation(fields: [agentId], references: [id])
   agentId     String
   vps         VPS      @relation(fields: [vpsId], references: [id])
   vpsId       String
-  
-  // Execution
   commands    CommandHistory[]
-  logs        String?  // Consolidated logs
+  logs        String?
   errorMessage String?
-  
-  // Timestamps
   createdAt   DateTime @default(now())
   startedAt   DateTime?
   completedAt DateTime?
-  
+
   @@index([agentId])
   @@index([vpsId])
   @@index([status])
@@ -419,23 +431,18 @@ enum DeploymentStatus {
 }
 
 // ============================================
-// 6. System Metrics (Optional for Phase 1)
+// 6. System Metrics
 // ============================================
 model SystemMetric {
   id          String   @id @default(cuid())
-  
   vpsId       String
-  
-  // Metrics
   cpuUsage    Float?
   memoryUsage Float?
   diskUsage   Float?
   networkIn   Float?
   networkOut  Float?
-  
-  // Timestamp
   timestamp   DateTime @default(now())
-  
+
   @@index([vpsId])
   @@index([timestamp])
 }
